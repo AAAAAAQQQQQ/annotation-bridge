@@ -120,6 +120,13 @@ cd annotation-bridge
 > **装不上？** 正式版 Chrome 从 137 起不再支持 `--load-extension` 命令行参数（静默忽略、不报错），
 > 只能用 `chrome://extensions` 手动加载。原因和实测记录见 [docs/loading-unpacked-extensions.md](docs/loading-unpacked-extensions.md)。
 
+#### 连不上本地服务？
+
+Chrome 从 **142** 起默认启用 **Local Network Access**：从公共来源访问 `127.0.0.1` 需要用户授权，
+而扩展页拿不到那个授权弹窗，请求会被直接拦掉（报 `Failed to fetch`，和"服务没开"一模一样）。
+
+打开 `chrome://flags/#local-network-access-check` → 设为 **Disabled** → 重启浏览器。
+
 ### 3. 用
 
 点工具栏图标 → 侧边栏从右侧弹出。

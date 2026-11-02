@@ -24,11 +24,37 @@ function friendly(e) {
   return m.length > 120 ? m.slice(0, 120) + '…' : m;
 }
 
-function setOffline(on) {
+function setOffline(on, why) {
+  if (why) lastError = why;
   $('offline')?.classList.toggle('hidden', !on);
   $('status')?.classList.toggle('ok', !on);
+  const msg = $('offlineMsg');
+  if (msg) {
+    if (!on) msg.textContent = '';
+    else {
+      const v = navigator.userAgent.match(/Chrome\/(\d+)/);
+      const modern = v && Number(v[1]) >= 142;
+      msg.textContent = modern
+        ? '连不上本地服务 · Chrome 142+ 请把 chrome://flags/#local-network-access-check 设为 Disabled 后重启'
+        : `连不上本地服务${lastError ? ' · ' + lastError.slice(0, 40) : ''}`;
+    }
+  }
   if (on) { $('statusText') && ($('statusText').textContent = '离线'); startAutoRetry(); }
   else stopAutoRetry();
+}
+
+/** 依次尝试候选地址，返回可用的那个 */
+async function probeBridge() {
+  const cands = bridgeCandidates.length ? bridgeCandidates
+    : ['http://127.0.0.1:47391', 'http://localhost:47391'];
+  for (const c of cands) {
+    try {
+      const r = await fetch(c + '/health', { cache: 'no-store' });
+      if (r.ok) { bridgeCandidates = cands; bridge = c; return true; }
+      lastError = `HTTP ${r.status}`;
+    } catch (e) { lastError = String(e?.message || e); }
+  }
+  return false;
 }
 
 let retryTimer = null;
@@ -41,6 +67,7 @@ function startAutoRetry() {
 }
 function stopAutoRetry() { clearInterval(retryTimer); retryTimer = null; }
 async function reconnect() {
+  await probeBridge();
   const ok = await loadTools();
   if (ok) { setOffline(false); await loadSessions(); await loadQueue(); hint('sendHint', '已重新连接', 'ok'); }
 }
@@ -49,8 +76,8 @@ async function api(path, opts = {}) {
   let res;
   try {
     res = await fetch(bridge + path, { headers: { 'content-type': 'application/json' }, ...opts });
-  } catch {
-    setOffline(true);
+  } catch (e) {
+    setOffline(true, String(e?.message || e));
     throw new ApiError('连不上本地服务', 'OFFLINE');
   }
   let data = null; try { data = await res.json(); } catch {}
