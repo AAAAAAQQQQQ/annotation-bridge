@@ -56,7 +56,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       if (!pages.length) return reply(null);
       const active = pages.filter((t) => t.active).sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
       const t = active[0] || pages.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
-      reply({ tabId: t.id, url: t.url, title: t.title });
+      reply({ tabId: t.id, url: t.url, title: t.title, windowId: t.windowId });
     });
     return true;
   }

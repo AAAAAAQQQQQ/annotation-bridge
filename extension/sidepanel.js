@@ -11,6 +11,7 @@ let qSummary = {};           // 每个会话的待发条数，会话列表角标
 let lastSend = null;         // 最近一次发送的参数，回复轮询用
 let captures = [];   // 待随下一条标注一起发送的截图/控制台
 let tools = [], tool = 'codex', sessions = [], selected = null, picked = [], pollTimer = null;
+let pickingActive = false;   // 面板这边记一下拾取状态，Esc 才能随时退出
 
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const meta = () => tools.find((t) => t.id === tool) || {};
@@ -255,12 +256,29 @@ async function ensureContent(tabId) {
     } catch { return false; }
   }
 }
+function setPicking(on) {
+  pickingActive = !!on;
+  const fab = $('fabPick');
+  if (fab) fab.innerHTML = on ? '<span>⌖</span>退出' : '<span>⌖</span>选元素';
+  $('btnPick')?.classList.toggle('picking', on);
+}
+
 async function startPick() {
+  if (pickingActive) return stopPickRemote();
   const tab = await activeTab();
   if (!tab?.tabId) return hint('sendHint', '没有可用的标签页', 'err');
   if (!(await ensureContent(tab.tabId))) return hint('sendHint', '这个页面不允许注入脚本', 'err');
   await chrome.tabs.sendMessage(tab.tabId, { type: 'START_PICK' });
-  hint('sendHint', '已进入拾取模式：回页面点一个元素，Esc 取消');
+  setPicking(true);
+  hint('sendHint', '拾取中：在页面上点元素 · 按 Esc 退出', 'ok');
+}
+
+/** 面板有焦点时也能退出拾取（页面那边收不到键盘事件） */
+async function stopPickRemote() {
+  const tab = await activeTab();
+  if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'STOP_PICK' }).catch(() => {});
+  setPicking(false);
+  hint('sendHint', '已退出拾取', '');
 }
 function renderPicked() {
   const box = $('pickedBox');
@@ -544,16 +562,49 @@ function bindEditor() {
   });
 }
 
+/** 图片进附件（截图 / 贴图 / 拖进来 都走这里） */
+async function attachImage(dataUrl) {
+  const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'screenshot', dataUrl }) });
+  captures.push({ kind: 'screenshot', id: d.id, path: d.path, url: d.url, dataUrl });
+  renderCaps();
+  hint('sendHint', '已添加图片，会随下一条标注一起发', 'ok');
+}
+
 async function takeShot() {
+  const tab = await activeTab();
+  if (!tab?.tabId) return hint('sendHint', '没有可截图的页面', 'err');
   try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-    openEditor(dataUrl, async (annotated) => {
-      const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'screenshot', dataUrl: annotated }) });
-      captures.push({ kind: 'screenshot', id: d.id, path: d.path, url: d.url, dataUrl: annotated });
-      renderCaps();
-      hint('sendHint', '已保存标注截图，会随下一条标注一起发', 'ok');
-    });
-  } catch (e) { hint('sendHint', '截图失败：' + friendly(e), 'err'); }
+    // 一定要传网页所在窗口：面板是独立窗口时，null 会把面板自己截下来
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+    openEditor(dataUrl, attachImage);
+  } catch (e) { hint('sendHint', '截图失败：' + friendly(e) + ' · 也可以直接 ⌘V 贴图', 'err'); }
+}
+
+const blobToDataUrl = (blob) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(r.result);
+  r.onerror = rej;
+  r.readAsDataURL(blob);
+});
+
+function imageIntoEditor(blob) {
+  if (!blob || !(blob.type || '').startsWith('image/')) return;
+  blobToDataUrl(blob)
+    .then((d) => openEditor(d, attachImage))
+    .catch(() => hint('sendHint', '读取图片失败', 'err'));
+}
+
+async function pasteFromClipboard() {
+  try {
+    const items = await navigator.clipboard.read();
+    for (const it of items) {
+      const type = (it.types || []).find((t) => t.startsWith('image/'));
+      if (type) { imageIntoEditor(await it.getType(type)); return; }
+    }
+    hint('sendHint', '剪贴板里没有图片', '');
+  } catch (e) {
+    hint('sendHint', '读不到剪贴板 · 直接按 ⌘V 试试', 'err');
+  }
 }
 
 // ── 队列 ──
@@ -597,6 +648,7 @@ async function addToQueue() {
       severity: $('severity').value, captures: captures.slice() }) });
     captures = []; renderCaps();
     picked = []; renderPicked();
+    if (pickingActive) await stopPickRemote();
     const tab = await activeTab();
     if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'CLEAR_PICKS' }).catch(() => {});
     $('comment').value = ''; $('comment').focus();
@@ -808,6 +860,34 @@ function bind() {
   $('tabSessions').addEventListener('click', () => switchTab('sessions'));
   $('btnPick').addEventListener('click', startPick);
   $('btnShot').addEventListener('click', takeShot);
+  $('btnPaste')?.addEventListener('click', pasteFromClipboard);
+
+  // 面板有焦点时 Esc 也能退出拾取（页面收不到键盘事件）
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && pickingActive) {
+      e.preventDefault();
+      stopPickRemote();
+    }
+  });
+
+  // ⌘V 直接贴图
+  document.addEventListener('paste', (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type && i.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    imageIntoEditor(item.getAsFile());
+  });
+
+  // 图片拖进面板
+  document.addEventListener('dragover', (e) => {
+    if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault();
+  });
+  document.addEventListener('drop', (e) => {
+    const f = [...(e.dataTransfer?.files || [])].find((x) => (x.type || '').startsWith('image/'));
+    if (!f) return;
+    e.preventDefault();
+    imageIntoEditor(f);
+  });
   bindEditor();
   $('btnGrabLogs').addEventListener('click', () => grabConsole(false));
   $('btnClearCaps').addEventListener('click', () => { captures = []; renderCaps(); });
@@ -836,12 +916,19 @@ function bind() {
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === 'ELEMENT_PICKED') {
+      setPicking(true);
       picked = msg.payload.items || [];
       renderPicked();
       hint('sendHint', picked.length ? `已选 ${picked.length} 个元素${picked.length > 1 ? '（可继续点，Enter 结束）' : ''}` : '已清空选择', 'ok');
     }
-    if (msg?.type === 'PICK_FINISHED') hint('sendHint', `已选 ${msg.count} 个元素，写备注后回车入队`, 'ok');
-    if (msg?.type === 'PICK_CANCELLED') hint('sendHint', '已取消拾取');
+    if (msg?.type === 'PICK_FINISHED') {
+      setPicking(false);
+      hint('sendHint', `已选 ${msg.count} 个元素，写备注后回车入队`, 'ok');
+    }
+    if (msg?.type === 'PICK_CANCELLED') {
+      setPicking(false);
+      hint('sendHint', '已退出拾取');
+    }
   });
 }
 

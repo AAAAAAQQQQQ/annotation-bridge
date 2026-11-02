@@ -117,8 +117,19 @@ const { result: { sessionId: tSid } } = await send('Target.attachToTarget', { ta
 await send('Runtime.enable', {}, tSid);
 await send('Emulation.setDeviceMetricsOverride', { width: 460, height: 1000, deviceScaleFactor: 1, mobile: false }, tSid);
 
-// 面板里点「选元素」
+// ── Esc 随时退出：面板有焦点、还没选任何元素 ──
 await sleep(1200);
+await ev(pSid, `document.getElementById('fabPick').click()`);
+await sleep(600);
+const fabPicking = await ev(pSid, `document.getElementById('fabPick').textContent`);
+await ev(pSid, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+await sleep(600);
+const fabAfterEsc = await ev(pSid, `document.getElementById('fabPick').textContent`);
+const bannerAfterEsc = await ev(tSid, `(() => { const d=[...document.querySelectorAll('div')].find(x=>(x.textContent||'').startsWith('拾取模式')); return d ? getComputedStyle(d).display : 'none'; })()`);
+console.log('Esc 退出:', JSON.stringify({ fabPicking, fabAfterEsc, bannerAfterEsc }));
+
+// 面板里点「选元素」
+
 const tabSeen = await ev(pSid, `chrome.runtime.sendMessage({type:'GET_ACTIVE_TAB'}).then(t=>JSON.stringify(t))`);
 console.log('面板看到的 active tab:', tabSeen);
 await ev(pSid, `document.getElementById('fabPick').click()`);
@@ -177,6 +188,23 @@ await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 380, y: 700, 
 await sleep(600);
 const afterBlank = await ev(pSid, `document.querySelectorAll('#pickedBox .pick-row').length`);
 console.log('点空白之后行数（应保持不变）:', afterBlank);
+// ── 贴图：⌘V 把图片贴进来，走标注编辑器 ──
+await ev(pSid, `(async () => {
+  const c = document.createElement('canvas'); c.width = 160; c.height = 80;
+  const g = c.getContext('2d'); g.fillStyle = '#ff3b30'; g.fillRect(0, 0, 160, 80);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  const dt = new DataTransfer();
+  dt.items.add(new File([blob], 'paste.png', { type: 'image/png' }));
+  document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+  return 'ok';
+})()`);
+await sleep(900);
+const editorOpen = await ev(pSid, `!document.getElementById('shotModal').classList.contains('hidden')`);
+await ev(pSid, `document.getElementById('btnEdSave').click()`);
+await sleep(1500);
+const capCount = await ev(pSid, `document.querySelectorAll('#capsChips .thumb-wrap').length`);
+console.log('贴图:', JSON.stringify({ editorOpen, 附件数: capCount }));
+
 const shot = await send('Page.captureScreenshot', { format: 'png' }, pSid);
 fs.writeFileSync(path.join(ROOT, 'test/out-pick.png'), Buffer.from(shot.result.data, 'base64'));
 const pageShot = await send('Page.captureScreenshot', { format: 'png' }, tSid);

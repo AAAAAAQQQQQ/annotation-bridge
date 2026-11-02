@@ -40,6 +40,7 @@ body.standalone .bar{-webkit-app-region:drag}
 .pane{display:flex;flex-direction:column;gap:10px}
 
 /* 拾取 */
+.pick-area.picking{border-style:solid;border-color:var(--accent);background:var(--accent-soft)}
 .pick-area{display:flex;align-items:center;gap:10px;width:100%;padding:12px;text-align:left;
   border:1.5px dashed color-mix(in srgb,var(--accent) 40%,transparent);border-radius:12px;
   background:color-mix(in srgb,var(--accent) 4%,transparent)}

@@ -178,9 +178,16 @@
     chrome.runtime.sendMessage({ type: 'ELEMENT_PICKED', payload: { multi: true, items: picked } }).catch(() => {});
   };
   const onKey = (e) => {
-    if (e.key === 'Escape' && picking) {
+    if (!picking) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
       stopPick();
       chrome.runtime.sendMessage({ type: 'PICK_CANCELLED' }).catch(() => {});
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const count = picked.length;
+      stopPick();
+      chrome.runtime.sendMessage({ type: 'PICK_FINISHED', count }).catch(() => {});
     }
   };
 
