@@ -207,10 +207,27 @@ function renderCaps() {
   const box = $('capsChips');
   if (!captures.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
   box.classList.remove('hidden');
-  box.innerHTML = captures.map((c, i) => `
-    <span class="chip">${c.kind === 'screenshot' ? '📷 截图' : '🖥 控制台 ' + c.count + ' 条'}<span class="x" data-i="${i}">✕</span></span>`).join('');
-  box.querySelectorAll('.x').forEach((el) => el.addEventListener('click', () => {
+  box.innerHTML = captures.map((c, i) => {
+    if (c.kind === 'screenshot') {
+      const src = c.dataUrl || (c.url ? bridge + c.url : '');
+      return `<div class="thumb-wrap" data-i="${i}">
+        <img class="thumb" src="${src}" alt="截图" title="点击查看大图" />
+        <span class="x" data-i="${i}">✕</span>
+      </div>`;
+    }
+    return `<span class="chip">🖥 控制台 ${c.count} 条<span class="x" data-i="${i}">✕</span></span>`;
+  }).join('');
+
+  box.querySelectorAll('.x').forEach((el) => el.addEventListener('click', (e) => {
+    e.stopPropagation();
     captures.splice(Number(el.dataset.i), 1); renderCaps();
+    hint('sendHint', '已移除附件');
+  }));
+  box.querySelectorAll('.thumb').forEach((img) => img.addEventListener('click', () => {
+    const i = Number(img.parentElement.dataset.i);
+    const c = captures[i];
+    const url = c.url ? bridge + c.url : c.dataUrl;
+    if (url) chrome.tabs.create({ url });   // 想看大图就在新标签打开
   }));
 }
 
@@ -238,7 +255,7 @@ async function takeShot() {
   try {
     const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
     const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'screenshot', dataUrl }) });
-    captures.push({ kind: 'screenshot', path: d.path });
+    captures.push({ kind: 'screenshot', id: d.id, path: d.path, url: d.url, dataUrl });
     renderCaps();
     hint('sendHint', '已截图，会随下一条标注一起发', 'ok');
   } catch (e) { hint('sendHint', '截图失败：' + friendly(e), 'err'); }

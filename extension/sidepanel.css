@@ -173,3 +173,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
 .badge{display:inline-block;margin-left:6px;min-width:16px;padding:0 5px;border-radius:999px;
   background:var(--accent);color:#fff;font-size:10px;vertical-align:middle;text-align:center}
+
+.thumb-wrap{position:relative;display:inline-block;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
+.thumb{display:block;width:120px;height:68px;object-fit:cover;object-position:top left;cursor:zoom-in;background:var(--panel)}
+.thumb-wrap .x{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;border-radius:5px;
+  width:16px;height:16px;line-height:15px;text-align:center;font-size:11px;cursor:pointer}
+.thumb-wrap .x:hover{background:var(--red)}

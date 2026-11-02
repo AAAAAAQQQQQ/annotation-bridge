@@ -483,6 +483,23 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (p === '/capture/file') {
+      const id = String(u.searchParams.get('id') || '').replace(/[^a-z0-9]/gi, '');
+      if (!id) return json(res, 400, { error: 'id required' });
+      for (const ext of ['png', 'json']) {
+        const f = path.join(CAP_DIR, `${id}.${ext}`);
+        if (exists(f)) {
+          const buf = fs.readFileSync(f);
+          res.writeHead(200, {
+            'content-type': ext === 'png' ? 'image/png' : 'application/json; charset=utf-8',
+            'access-control-allow-origin': '*', 'cache-control': 'max-age=300',
+          });
+          return res.end(buf);
+        }
+      }
+      return json(res, 404, { error: 'capture not found' });
+    }
+
     if (p === '/capture' && req.method === 'POST') {
       const b = await readBody(req);
       const id = uid();
@@ -491,7 +508,7 @@ const server = http.createServer(async (req, res) => {
         const b64 = String(b.dataUrl).replace(/^data:image\/\w+;base64,/, '');
         const file = path.join(CAP_DIR, `${id}.png`);
         fs.writeFileSync(file, Buffer.from(b64, 'base64'));
-        return json(res, 200, { id, kind: 'screenshot', path: file, ts });
+        return json(res, 200, { id, kind: 'screenshot', path: file, url: `/capture/file?id=${id}`, ts });
       }
       if (b.kind === 'console') {
         const logs = Array.isArray(b.logs) ? b.logs.slice(-80) : [];
