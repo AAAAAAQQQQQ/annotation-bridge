@@ -283,9 +283,11 @@ async function sendAll() {
   hint('sendHint', '发送中…');
   const startedAt = Date.now();
   try {
+    lastSend = { mode: $('mode').value, model: $('model').value, effort: $('effort').value, count: null };
     const d = await api('/send', { method: 'POST', body: JSON.stringify({
       tool, thread: selected.id, mode: $('mode').value,
       model: $('model').value || undefined, effort: $('effort').value || undefined }) });
+    lastSend.count = d.count;
     if (d.dryRun) hint('sendHint', `DRY_RUN：已生成 ${d.count} 条，未真正投递`, 'ok');
     else hint('sendHint', `已投递 ${d.count} 条 · ${d.mode}${d.effort ? ' · ' + d.effort : ''}`, 'ok');
     await loadQueue();
@@ -347,34 +349,47 @@ function pollReply(since) {
     const text = last?.text || '';
     const multi = msgs.length > 1;
     const long = text.length > 110;
-    const needToggle = done && (multi || long || tools > 0);
+    const canMore = done && (multi || long || tools > 0);
+
+    const modeLabel = ({ queue: '排队', resume: '续跑', print: '续跑', headless: '续跑' })[lastSend.mode] || lastSend.mode || '-';
+    const metaRows = [
+      ['方式', modeLabel],
+      ['模型', lastSend.model || '会话默认'],
+      ['强度', lastSend.effort || '默认'],
+      ['耗时', `${sec}s`],
+      ['消息', `${msgs.length} 条`],
+      ['工具', `${tools} 次`],
+      ['投递', lastSend.count != null ? `${lastSend.count} 条标注` : '-'],
+    ];
 
     card.innerHTML = `
-      <div class="live ${done ? 'ok' : ''}">${done ? '✅ 完成' : '等待回复'} · ${sec}s${
-        done ? ` · ${msgs.length} 条${tools ? ` · ${tools} 次工具` : ''}` : ''}</div>
+      <div class="live ${done ? 'ok' : ''}">${done ? '✅' : '等待回复'} ${sec}s${
+        tools ? ` · ${tools} 次调用` : ''}${multi ? ` · ${msgs.length} 条` : ''}</div>
       ${done && text ? `<div class="live-sum${long || multi ? ' clamp' : ''}">${esc(text)}</div>` : ''}
+      <div class="live-meta hidden">
+        ${metaRows.map(([k, v]) => `<span><i>${k}</i>${esc(v)}</span>`).join('')}
+      </div>
       <div class="live-detail hidden"></div>
-      ${needToggle ? '<button class="link live-more">展开</button>' : ''}`;
+      ${canMore ? '<button class="link live-more">详情</button>' : ''}`;
 
     const more = card.querySelector('.live-more');
     const sum = card.querySelector('.live-sum');
+    const meta = card.querySelector('.live-meta');
     const detail = card.querySelector('.live-detail');
-    if (more) {
-      more.addEventListener('click', () => {
-        const open = detail.classList.toggle('hidden') === false;
-        if (multi) {
-          sum.classList.add('hidden');
-          if (open && !detail.childElementCount) msgs.forEach((m) => detail.appendChild(buildMsg(m)));
-        } else {
-          sum.classList.toggle('clamp', !open);
-          if (open && !detail.childElementCount) {
-            const c = chainNode(last);
-            if (c) detail.appendChild(c);
-          }
+    if (more) more.addEventListener('click', () => {
+      const open = detail.classList.contains('hidden');
+      meta.classList.toggle('hidden', !open);
+      detail.classList.toggle('hidden', !open);
+      if (open) {
+        if (!detail.childElementCount) {
+          if (multi) msgs.forEach((m) => detail.appendChild(buildMsg(m)));
+          else { sum?.classList.remove('clamp'); const c = chainNode(last); if (c) detail.appendChild(c); }
         }
-        more.textContent = open ? '收起' : '展开';
-      });
-    }
+      } else {
+        sum?.classList.add('clamp');
+      }
+      more.textContent = open ? '收起' : '详情';
+    });
   };
 
   const tick = async () => {
