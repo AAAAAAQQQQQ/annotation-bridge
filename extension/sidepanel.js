@@ -215,13 +215,18 @@ function renderCaps() {
         <span class="x" data-i="${i}">✕</span>
       </div>`;
     }
-    return `<span class="chip">🖥 控制台 ${c.count} 条<span class="x" data-i="${i}">✕</span></span>`;
+    return `<span class="chip console-chip" data-i="${i}" title="点击查看全部日志">🖥 控制台 ${c.count} 条<span class="x" data-i="${i}">✕</span></span>`;
   }).join('');
 
   box.querySelectorAll('.x').forEach((el) => el.addEventListener('click', (e) => {
     e.stopPropagation();
     captures.splice(Number(el.dataset.i), 1); renderCaps();
     hint('sendHint', '已移除附件');
+  }));
+  box.querySelectorAll('.console-chip').forEach((chip) => chip.addEventListener('click', (e) => {
+    if (e.target.classList.contains('x')) return;
+    const c = captures[Number(chip.dataset.i)];
+    if (c?.url) chrome.tabs.create({ url: bridge + c.url });
   }));
   box.querySelectorAll('.thumb').forEach((img) => img.addEventListener('click', () => {
     const i = Number(img.parentElement.dataset.i);
@@ -244,7 +249,7 @@ async function grabConsole(silent) {
     if (!silent) {
       if (!r?.total) return hint('sendHint', '这个页面还没有捕获到日志', '');
       const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'console', logs: r.logs }) });
-      captures.push({ kind: 'console', count: d.count, path: d.path, preview: d.preview });
+      captures.push({ kind: 'console', id: d.id, count: d.count, path: d.path, url: d.url, preview: d.preview });
       renderCaps();
       hint('sendHint', `已附上 ${d.count} 条控制台日志`, 'ok');
     }

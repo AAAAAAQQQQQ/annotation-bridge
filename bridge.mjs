@@ -516,7 +516,7 @@ const server = http.createServer(async (req, res) => {
         fs.writeFileSync(file, JSON.stringify(logs, null, 2));
         const preview = logs.filter((l) => l.level === 'error' || l.level === 'warn')
           .slice(-8).map((l) => `[${l.level}] ${String(l.text).slice(0, 160)}`);
-        return json(res, 200, { id, kind: 'console', path: file, count: logs.length, preview, ts });
+        return json(res, 200, { id, kind: 'console', path: file, url: `/capture/file?id=${id}`, count: logs.length, preview, ts });
       }
       return json(res, 400, { error: 'unknown capture kind' });
     }
