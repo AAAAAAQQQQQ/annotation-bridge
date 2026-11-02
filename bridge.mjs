@@ -157,11 +157,12 @@ const codex = {
     return { threadId, replyText: text.trim(), model: model || '默认', effort: effort || '' };
   },
 
-  async send({ thread, mode, model, effort, message, session }) {
+  async send({ thread, mode, model, effort, message, session, images }) {
     if (mode === 'resume') {
       const args = ['exec', 'resume', thread, '--skip-git-repo-check'];
       if (model) args.push('-m', model);
       if (effort) args.push('-c', `model_reasoning_effort="${effort}"`);
+      for (const img of images || []) args.push('-i', img);   // 让模型直接看到截图
       args.push('-');
       const cwd = session?.cwd && exists(session.cwd) ? session.cwd : process.cwd();
       const r = await execFileP(BIN.codex, args, {
@@ -600,14 +601,25 @@ const server = http.createServer(async (req, res) => {
       if (!mine.length) return json(res, 400, { error: '这个会话的队列是空的（队列按会话隔离）' });
 
       const session = sessionsCached(tool, 200).find((x) => x.id === b.thread) || {};
+      const images = mine
+        .flatMap((it) => it.captures || [])
+        .filter((c) => c.kind === 'screenshot' && c.path && typeof c.path === 'string')
+        .map((c) => c.path)
+        .filter((p) => exists(p))
+        .slice(0, 6);
       const message = composeMessage(mine);
       const startedAt = Date.now();
 
       if (DRY_RUN) {
-        return json(res, 200, { ok: true, dryRun: true, tool, mode: b.mode, model: b.model, effort: b.effort, count: mine.length, startedAt, message });
+        const willRun = tool === 'codex'
+          ? ['exec', 'resume', '<thread>', ...(b.model ? ['-m', b.model] : []),
+             ...(b.effort ? ['-c', `model_reasoning_effort="${b.effort}"`] : []),
+             ...images.flatMap((p) => ['-i', p]), '-']
+          : ['queue', '--thread', '<thread>', '--message', '<text>'];
+        return json(res, 200, { ok: true, dryRun: true, tool, mode: b.mode, model: b.model, effort: b.effort, count: mine.length, startedAt, message, images, willRun });
       }
       try {
-        const r = await T.send({ thread: b.thread, mode: b.mode, model: b.model, effort: b.effort, message, session });
+        const r = await T.send({ thread: b.thread, mode: b.mode, model: b.model, effort: b.effort, message, session, images });
         saveQueue(q.filter((x) => !mine.some((m) => m.id === x.id)));
         return json(res, 200, { ok: true, tool, count: mine.length, startedAt, message, ...r });
       } catch (e) {

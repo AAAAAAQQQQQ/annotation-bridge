@@ -197,3 +197,5 @@ button:disabled{opacity:.45;cursor:not-allowed}
 #edColor{width:28px;height:26px;border:none;background:none;padding:0;border-radius:6px}
 .ed-canvas-wrap{max-height:52vh;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#fff}
 #edCanvas{display:block;width:100%;height:auto;cursor:crosshair;touch-action:none}
+
+.cap-warn{font-size:11px;color:var(--warn,#d97706);line-height:1.5}

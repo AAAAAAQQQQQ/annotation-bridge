@@ -239,9 +239,21 @@ function renderPicked() {
 }
 
 // ── 采集附件 ──
+function updateCapWarn() {
+  const el = $('capWarn'); if (!el) return;
+  const hasShot = captures.some((c) => c.kind === 'screenshot');
+  const queueMode = $('mode').value === 'queue';
+  el.textContent = hasShot && queueMode ? '截图只在「续跑」模式下会作为图片送进模型；排队模式只给文件路径' : '';
+  el.classList.toggle('hidden', !el.textContent);
+}
+
 function renderCaps() {
   const box = $('capsChips');
-  if (!captures.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  if (!captures.length) {
+    box.classList.add('hidden'); box.innerHTML = '';
+    updateCapWarn();
+    return;
+  }
   box.classList.remove('hidden');
   box.innerHTML = captures.map((c, i) => {
     if (c.kind === 'screenshot') {
@@ -264,6 +276,7 @@ function renderCaps() {
     const c = captures[Number(chip.dataset.i)];
     if (c?.url) chrome.tabs.create({ url: bridge + c.url });
   }));
+  updateCapWarn();
   box.querySelectorAll('.thumb').forEach((img) => img.addEventListener('click', () => {
     const i = Number(img.parentElement.dataset.i);
     const c = captures[i];
@@ -688,7 +701,7 @@ function bind() {
     await api('/queue/clear', { method: 'POST', body: JSON.stringify({ thread: selected.id, tool }) });
     await loadQueue(); await refreshSummary();
   });
-  $('mode').addEventListener('change', syncOpts);
+  $('mode').addEventListener('change', () => { syncOpts(); updateCapWarn(); });
   $('model').addEventListener('change', () => { renderEfforts('model', 'effort'); syncOpts(); });
   $('newModel').addEventListener('change', () => renderEfforts('newModel', 'newEffort'));
   $('btnNew').addEventListener('click', openNew);
