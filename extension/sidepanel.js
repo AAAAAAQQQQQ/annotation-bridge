@@ -72,7 +72,28 @@ async function reconnect() {
   if (ok) { setOffline(false); await loadSessions(); await loadQueue(); hint('sendHint', '已重新连接', 'ok'); }
 }
 
+async function nativeCall(path, method, body) {
+  const r = await chrome.runtime.sendMessage({ type: 'API', req: { method, path, body } });
+  if (!r || r.native === false) return null;      // host 没装 → 交给 HTTP
+  return r;
+}
+
 async function api(path, opts = {}) {
+  const method = opts.method || 'GET';
+  let body;
+  if (opts.body) { try { body = JSON.parse(opts.body); } catch {} }
+
+  // 1) 原生消息（不经浏览器网络层，不受 LNA 限制）
+  try {
+    const r = await nativeCall(path, method, body);
+    if (r) {
+      if (r.status >= 400) throw new ApiError(r.data?.error || `HTTP ${r.status}`, r.status === 502 ? 'UPSTREAM' : 'HTTP');
+      setOffline(false);
+      return r.data;
+    }
+  } catch (e) { if (e instanceof ApiError) throw e; }
+
+  // 2) 回退 HTTP（开发/测试环境）
   let res;
   try {
     res = await fetch(bridge + path, { headers: { 'content-type': 'application/json' }, ...opts });
@@ -257,9 +278,9 @@ function renderCaps() {
   box.classList.remove('hidden');
   box.innerHTML = captures.map((c, i) => {
     if (c.kind === 'screenshot') {
-      const src = c.dataUrl || (c.url ? bridge + c.url : '');
+      const src = c.dataUrl || '';
       return `<div class="thumb-wrap" data-i="${i}">
-        <img class="thumb" src="${src}" alt="截图" title="点击查看大图" />
+        <img class="thumb" ${src ? `src="${src}"` : `data-cap="${c.id}"`} alt="截图" title="点击查看大图" />
         <span class="x" data-i="${i}">✕</span>
       </div>`;
     }
@@ -271,12 +292,24 @@ function renderCaps() {
     captures.splice(Number(el.dataset.i), 1); renderCaps();
     hint('sendHint', '已移除附件');
   }));
-  box.querySelectorAll('.console-chip').forEach((chip) => chip.addEventListener('click', (e) => {
+  box.querySelectorAll('.console-chip').forEach((chip) => chip.addEventListener('click', async (e) => {
     if (e.target.classList.contains('x')) return;
     const c = captures[Number(chip.dataset.i)];
-    if (c?.url) chrome.tabs.create({ url: bridge + c.url });
+    try {
+      const d = await api(`/capture/data?id=${c.id}`);
+      const blob = new Blob([d.text || JSON.stringify(d, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      chrome.tabs.create({ url });
+    } catch (e2) { hint('sendHint', '打开日志失败：' + friendly(e2), 'err'); }
   }));
   updateCapWarn();
+  box.querySelectorAll('.thumb[data-cap]').forEach(async (img) => {
+    if (img.src) return;
+    try {
+      const d = await api(`/capture/data?id=${img.dataset.cap}`);
+      if (d?.dataUrl) img.src = d.dataUrl;
+    } catch {}
+  });
   box.querySelectorAll('.thumb').forEach((img) => img.addEventListener('click', () => {
     const i = Number(img.parentElement.dataset.i);
     const c = captures[i];

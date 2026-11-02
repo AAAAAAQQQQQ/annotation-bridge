@@ -492,6 +492,15 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (p === '/capture/data') {
+      const id = String(u.searchParams.get('id') || '').replace(/[^a-z0-9]/gi, '');
+      const pngFile = path.join(CAP_DIR, `${id}.png`);
+      const jsonFile = path.join(CAP_DIR, `${id}.json`);
+      if (exists(pngFile)) return json(res, 200, { kind: 'screenshot', dataUrl: `data:image/png;base64,${fs.readFileSync(pngFile).toString('base64')}` });
+      if (exists(jsonFile)) return json(res, 200, { kind: 'console', text: fs.readFileSync(jsonFile, 'utf8') });
+      return json(res, 404, { error: 'capture not found' });
+    }
+
     if (p === '/capture/file') {
       const id = String(u.searchParams.get('id') || '').replace(/[^a-z0-9]/gi, '');
       if (!id) return json(res, 400, { error: 'id required' });

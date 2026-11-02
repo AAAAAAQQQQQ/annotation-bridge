@@ -120,6 +120,17 @@ cd annotation-bridge
 > **装不上？** 正式版 Chrome 从 137 起不再支持 `--load-extension` 命令行参数（静默忽略、不报错），
 > 只能用 `chrome://extensions` 手动加载。原因和实测记录见 [docs/loading-unpacked-extensions.md](docs/loading-unpacked-extensions.md)。
 
+#### 推荐：装原生消息宿主（不需要端口）
+
+```bash
+cd ~/Project/annotation-bridge && ./install-native.sh
+```
+
+装完之后扩展通过 **Chrome 原生消息**跟本地进程通信：不经浏览器网络层，**不受 LNA 限制**，也不需要提前启动任何服务
+（Chrome 会在第一次用到时自动拉起宿主，宿主再自动拉起 bridge）。
+
+不装也能用，但走 HTTP 回退路径，Chrome 142+ 会被 LNA 拦。
+
 #### 连不上本地服务？
 
 Chrome 从 **142** 起默认启用 **Local Network Access**：从公共来源访问 `127.0.0.1` 需要用户授权，
