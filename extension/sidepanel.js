@@ -14,7 +14,7 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   return data;
 }
-function setStatus(ok, t) { $('status').classList.toggle('ok', !!ok); $('statusText').textContent = t; }
+function setStatus(ok, t) { $('status')?.classList.toggle('ok', !!ok); const el = $('statusText'); if (el) el.textContent = t; }
 function hint(el, t, kind = '') { const n = $(el); n.className = 'hint ' + kind; n.textContent = t; n.classList.toggle('hidden', !t); }
 function ago(ms) {
   const m = Math.floor((Date.now() - ms) / 60000);
@@ -40,13 +40,10 @@ function renderTabs() {
 
 // ── 会话 ──
 function updateSelectedUI() {
-  if (!selected) {
-    $('selTitle').textContent = '未选择会话';
-    $('selSub').textContent = '点这里选一个正在用的会话';
-    return;
-  }
-  $('selTitle').textContent = selected.title || String(selected.id).slice(0, 8);
-  $('selSub').textContent = `${selected.project || ''} · ${String(selected.id).slice(0, 8)}`;
+  const t = $('selTitle');
+  if (!t) return;
+  if (!selected) { t.textContent = '未选择会话'; return; }
+  t.textContent = selected.title || String(selected.id).slice(0, 8);
 }
 
 function renderList() {
@@ -69,9 +66,23 @@ function select(s) {
   selected = s;
   chrome.storage.local.set({ [K_THREAD]: { ...s, tool }, [K_CWD]: s.cwd || '' });
   updateSelectedUI(); renderList();
-  $('sessionPop').classList.add('hidden');
+  switchTab('feedback');
   $('messages').innerHTML = '<div class="empty">发送后这里会显示回复</div>';
   loadQueue();
+}
+
+async function loadTools() {
+  try {
+    const d = await api('/tools');
+    tools = d.tools || [];
+    if (!tools.find((t) => t.id === tool)?.available) tool = tools.find((t) => t.available)?.id || tool;
+    renderTabs(); renderOpts();
+    return true;
+  } catch { return false; }
+}
+
+async function loadSessionsOnce() {
+  try { const d = await api(`/sessions?tool=${tool}&limit=60`); sessions = d.sessions || []; renderList(); $('sessCount').textContent = String(sessions.length); } catch {}
 }
 
 async function loadSessions() {
@@ -79,7 +90,12 @@ async function loadSessions() {
     const d = await api(`/sessions?tool=${tool}&limit=60`);
     sessions = d.sessions || [];
     renderList();
+    $('sessCount').textContent = String(sessions.length);
     setStatus(true, `${sessions.length} 个会话`);
+    // 首次没拿到模型目录（bridge 刚起来），这里补一次
+    if (!tools.some((t) => (t.models || []).length)) {
+      if (await loadTools()) await loadSessionsOnce();
+    }
   } catch (e) {
     setStatus(false, '连接失败');
     $('sessionList').innerHTML = '<div class="pop-empty">连不上 bridge<br/>先运行 ./start.sh</div>';
@@ -182,6 +198,7 @@ async function loadQueue() {
     const d = await api(`/queue?thread=${encodeURIComponent(selected.id)}`);
     const q = d.queue || [];
     $('queueCount').textContent = String(q.length);
+    $('fabCount').textContent = String(q.length);
     $('queue').innerHTML = q.length ? q.map((it) => `
       <div class="qitem"><span class="x" data-del="1">✕</span>
         <div class="c">${esc(it.comment)}</div>
@@ -302,14 +319,20 @@ async function runNew() {
   finally { $('btnNewRun').disabled = false; }
 }
 
+// ── Tab ──
+function switchTab(name) {
+  const fb = name === 'feedback';
+  $('tabFeedback').classList.toggle('active', fb);
+  $('tabSessions').classList.toggle('active', !fb);
+  $('paneFeedback').classList.toggle('hidden', !fb);
+  $('paneSessions').classList.toggle('hidden', fb);
+  if (!fb) renderList();
+}
+
 // ── 绑定 ──
 function bind() {
   $('btnRefresh').addEventListener('click', loadSessions);
-  $('btnSession').addEventListener('click', () => {
-    const pop = $('sessionPop');
-    pop.classList.toggle('hidden');
-    if (!pop.classList.contains('hidden')) { renderList(); $('search').focus(); }
-  });
+  $('btnSession').addEventListener('click', () => { switchTab('sessions'); $('search').focus(); });
   $('search').addEventListener('input', renderList);
   $('btnUseId').addEventListener('click', () => {
     const id = $('manualId').value.trim();
@@ -317,6 +340,9 @@ function bind() {
     select({ id, title: id.slice(0, 10), project: '(手动)', mtime: Date.now() });
     $('manualId').value = '';
   });
+  $('fabPick').addEventListener('click', startPick);
+  $('tabFeedback').addEventListener('click', () => switchTab('feedback'));
+  $('tabSessions').addEventListener('click', () => switchTab('sessions'));
   $('btnPick').addEventListener('click', startPick);
   $('btnShot').addEventListener('click', takeShot);
   $('btnGrabLogs').addEventListener('click', () => grabConsole(false));
