@@ -160,7 +160,7 @@ const listState = await ev(pSid, `JSON.stringify({
   visible: !document.getElementById('pickedBox')?.classList.contains('hidden'),
   rows: document.querySelectorAll('#pickedBox .pick-row').length,
   first: document.querySelector('#pickedBox .pick-sel')?.textContent || '',
-  text: document.querySelector('#pickedBox .pick-txt')?.textContent || '',
+  text: document.querySelector('#pickedBox .pick-label')?.textContent || '',
   locate: document.querySelectorAll('#pickedBox .pick-locate').length,
 })`);
 console.log('已选列表:', listState);
@@ -188,6 +188,25 @@ await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 380, y: 700, 
 await sleep(600);
 const afterBlank = await ev(pSid, `document.querySelectorAll('#pickedBox .pick-row').length`);
 console.log('点空白之后行数（应保持不变）:', afterBlank);
+// 鼠标划过列表行 → 页面上高亮对应元素
+await ev(pSid, `(() => { document.querySelector('#pickedBox .pick-row').dispatchEvent(new MouseEvent('mouseenter')); return true; })()`);
+await sleep(500);
+const hl = await ev(tSid, `[...document.querySelectorAll('div')].filter(d => getComputedStyle(d).borderTopColor === 'rgb(245, 158, 11)').length`);
+await ev(pSid, `(() => { document.querySelector('#pickedBox .pick-row').dispatchEvent(new MouseEvent('mouseleave')); return true; })()`);
+console.log('划过列表行→页面高亮块:', hl);
+
+// 点文字 → 选中的是 <p>；按「↑」改成整张卡片
+const pPoint = JSON.parse(await ev(tSid, `(() => { const el = document.querySelector('div.card:nth-of-type(2) > b'); const r = el.getBoundingClientRect(); return JSON.stringify({ x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }); })()`));
+await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pPoint.x, y: pPoint.y }, tSid);
+await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pPoint.x, y: pPoint.y, button: 'left', clickCount: 1 }, tSid);
+await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pPoint.x, y: pPoint.y, button: 'left', clickCount: 1 }, tSid);
+await sleep(700);
+const beforePromote = await ev(pSid, `[...document.querySelectorAll('#pickedBox .pick-sel')].map(x => x.textContent.split(' · ')[0])`);
+await ev(pSid, `[...document.querySelectorAll('#pickedBox .pick-up')].pop().click()`);
+await sleep(700);
+const afterPromote = await ev(pSid, `[...document.querySelectorAll('#pickedBox .pick-sel')].map(x => x.textContent.split(' · ')[0])`);
+console.log('上一层:', JSON.stringify({ before: beforePromote, after: afterPromote }));
+
 // ── 贴图：⌘V 把图片贴进来，走标注编辑器 ──
 await ev(pSid, `(async () => {
   const c = document.createElement('canvas'); c.width = 160; c.height = 80;

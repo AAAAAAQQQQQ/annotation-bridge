@@ -259,7 +259,7 @@ async function ensureContent(tabId) {
 function setPicking(on) {
   pickingActive = !!on;
   const fab = $('fabPick');
-  if (fab) fab.innerHTML = on ? '<span>⌖</span>退出' : '<span>⌖</span>选元素';
+  if (fab) fab.innerHTML = on ? '<span>⌖</span>退出拾取' : '<span>⌖</span>选元素';
   $('btnPick')?.classList.toggle('picking', on);
 }
 
@@ -290,16 +290,21 @@ function renderPicked() {
       <span>已选 <b>${picked.length}</b> 个元素</span>
       <button class="link" id="btnClearPicked">清空</button>
     </div>
-    ${picked.map((el, i) => `
-      <div class="pick-row">
+    ${picked.map((el, i) => {
+      const size = el.rect ? ` · ${el.rect.w}×${el.rect.h}` : '';
+      const label = (el.text || el.tag || '元素').replace(/\s+/g, ' ').slice(0, 60);
+      return `
+      <div class="pick-row" data-i="${i}">
         <span class="num">${i + 1}</span>
         <div class="pick-body">
-          <code class="pick-sel" title="${esc(el.selector)}">${esc(el.selector)}</code>
-          ${el.text ? `<small class="pick-txt">${esc(String(el.text).slice(0, 70))}</small>` : ''}
+          <span class="pick-label" title="${esc(label)}">${esc(label)}</span>
+          <code class="pick-sel" title="${esc(el.selector)}">${esc(el.selector)}${size}</code>
         </div>
-        <span class="pick-locate" data-i="${i}" title="在页面上标出这个元素">定位</span>
+        <span class="pick-locate" data-i="${i}" title="在页面上定位（黄框闪一下）">⌖</span>
+        <span class="pick-up" data-i="${i}" title="改成选它的上一层（点到了文字/图标时很有用）">↑</span>
         <span class="x" data-i="${i}" title="从选择里移除">✕</span>
-      </div>`).join('')}`;
+      </div>`;
+    }).join('')}`;
   box.querySelectorAll('.x').forEach((x) => x.addEventListener('click', (e) => {
     e.stopPropagation();
     removePick(Number(x.dataset.i));
@@ -308,6 +313,23 @@ function renderPicked() {
     e.stopPropagation();
     locatePick(Number(x.dataset.i));
   }));
+  box.querySelectorAll('.pick-up').forEach((x) => x.addEventListener('click', (e) => {
+    e.stopPropagation();
+    promotePick(Number(x.dataset.i));
+  }));
+  // 鼠标划过行：在页面上把对应元素标出来，先看再决定
+  box.querySelectorAll('.pick-row').forEach((row) => {
+    row.addEventListener('mouseenter', async () => {
+      const el = picked[Number(row.dataset.i)];
+      if (!el) return;
+      const tab = await activeTab();
+      if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'HIGHLIGHT', selector: el.selector }).catch(() => {});
+    });
+    row.addEventListener('mouseleave', async () => {
+      const tab = await activeTab();
+      if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'UNHIGHLIGHT' }).catch(() => {});
+    });
+  });
   $('btnClearPicked')?.addEventListener('click', (e) => { e.stopPropagation(); clearPicked(); });
 }
 
@@ -330,6 +352,25 @@ async function clearPicked() {
   renderPicked();
   const tab = await activeTab();
   if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'CLEAR_PICKS' }).catch(() => {});
+}
+
+/** 改成选上一层：点到了文字/图标、想选整张卡片时用 */
+async function promotePick(i) {
+  const el = picked[i];
+  if (!el) return;
+  const tab = await activeTab();
+  if (!tab?.tabId) return;
+  try {
+    const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'PROMOTE', selector: el.selector });
+    if (r?.ok && Array.isArray(r.items)) {
+      picked = r.items;
+      renderPicked();
+      const now = picked.find((x) => x.selector === el.selector) || picked[Math.min(i, picked.length - 1)];
+      hint('sendHint', now ? `已改成上一层：${String(now.selector).slice(0, 60)}` : '已改成上一层', 'ok');
+    } else {
+      hint('sendHint', r?.error || '没有上一层了', 'err');
+    }
+  } catch { hint('sendHint', '页面还没注入脚本 · 刷新一下', 'err'); }
 }
 
 async function locatePick(i) {
@@ -924,6 +965,7 @@ function bind() {
     if (msg?.type === 'PICK_FINISHED') {
       setPicking(false);
       hint('sendHint', `已选 ${msg.count} 个元素，写备注后回车入队`, 'ok');
+      $('comment')?.focus();     // 选完直接把光标放到备注框，少一次点击
     }
     if (msg?.type === 'PICK_CANCELLED') {
       setPicking(false);

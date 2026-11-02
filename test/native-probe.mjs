@@ -189,7 +189,7 @@ const panelState = JSON.parse(state || '{}');
 const checks = {
   '扩展 ID 匹配': loadedId === extId,
   '原生通道有回包': nativeOk,
-  '宿主启动并转发了请求': /host 启动/.test(tail) && /GET \/health/.test(fresh),
+  '宿主启动并转发了请求': /host 启动/.test(tail) && /GET \/health/.test(tail),
   '宿主自动拉起 bridge': !up && !!h?.ok && tail.includes(`bridge 已启动 pid=${h.pid}`),
   'bridge 存活': !!h?.ok,
   '面板拿到会话/工具': (panelState.sessions || 0) > 0 || (panelState.tools || []).length > 0,

@@ -193,29 +193,69 @@
 
   const onLeave = (e) => { if (e && e.relatedTarget) return; hideHover(); };
 
+  // 滚动 / 缩放：marked 框是 fixed 定位，不重画就会和元素错位
+  let markRaf = 0;
+  function scheduleMarks() {
+    if (markRaf) return;
+    markRaf = requestAnimationFrame(() => {
+      markRaf = 0;
+      if (!picking) return;
+      hideHover();
+      drawMarks();
+    });
+  }
+
+  let prevCursor = '', prevSelect = '';
   function startPick() {
+    // 重复进入拾取（比如两个面板）时不要用 crosshair 覆盖掉原来的光标
+    if (!picking) {
+      prevCursor = document.documentElement.style.cursor;
+      prevSelect = document.documentElement.style.userSelect;
+    }
     picking = true; mount();
     banner.style.display = 'block';
     updateBanner();
     drawMarks();            // 上次选过的元素，重新进拾取模式也画出来
+    document.documentElement.style.cursor = 'crosshair';
+    document.documentElement.style.userSelect = 'none';
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('click', onClick, true);
     document.addEventListener('keydown', onKey, true);
     window.addEventListener('mouseout', onLeave, true);
-    window.addEventListener('scroll', hideHover, true);
+    window.addEventListener('scroll', scheduleMarks, true);
+    window.addEventListener('resize', scheduleMarks);
     window.addEventListener('blur', hideHover);
   }
   function stopPick() {
     picking = false; hoverEl = null;
-    clearMarks();
+    clearMarks(); clearHighlight();
+    document.documentElement.style.cursor = prevCursor;
+    document.documentElement.style.userSelect = prevSelect;
     document.removeEventListener('mousemove', onMove, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('mouseout', onLeave, true);
-    window.removeEventListener('scroll', hideHover, true);
+    window.removeEventListener('scroll', scheduleMarks, true);
+    window.removeEventListener('resize', scheduleMarks);
     window.removeEventListener('blur', hideHover);
     banner.style.display = 'none'; box.style.display = 'none'; tip.style.display = 'none';
     unmount();
+  }
+
+  // 面板里鼠标划过某一行时，在页面上把它标出来（不动已选状态）
+  let highlightEl = null;
+  function clearHighlight() { if (highlightEl) { highlightEl.remove(); highlightEl = null; } }
+  function highlight(selector) {
+    clearHighlight();
+    const node = document.querySelector(selector);
+    if (!node) return;
+    const r = node.getBoundingClientRect();
+    const h = document.createElement('div');
+    h.style.cssText = `position:fixed;pointer-events:none;z-index:2147483647;
+      left:${r.left - 2}px;top:${r.top - 2}px;width:${r.width + 4}px;height:${r.height + 4}px;
+      border:2px dashed #f59e0b;border-radius:6px;background:rgba(245,158,11,.07)`;
+    document.documentElement.appendChild(h);
+    highlightEl = h;
   }
 
   chrome.runtime.onMessage.addListener((msg, _s, reply) => {
@@ -230,6 +270,24 @@
       reply({ ok: true, items: picked });
     }
     if (msg?.type === 'FLASH') { flash(msg.selector); reply({ ok: true }); }
+    if (msg?.type === 'HIGHLIGHT') { highlight(msg.selector); reply({ ok: true }); }
+    if (msg?.type === 'UNHIGHLIGHT') { clearHighlight(); reply({ ok: true }); }
+    if (msg?.type === 'PROMOTE') {
+      const node = document.querySelector(msg.selector);
+      const parent = node && node.parentElement;
+      if (!parent || parent === document.body || parent === document.documentElement) {
+        reply({ ok: false, error: '已经到最外层了' });
+      } else {
+        const info = describe(parent);
+        const idx = picked.findIndex((x) => x.selector === msg.selector);
+        if (idx >= 0) {
+          if (picked.some((x) => x.selector === info.selector)) picked.splice(idx, 1);
+          else picked[idx] = info;
+        }
+        drawMarks();
+        reply({ ok: true, items: picked });
+      }
+    }
     if (msg?.type === 'CLEAR_PICKS') { picked = []; clearMarks(); updateBanner(); reply({ ok: true }); }
     if (msg?.type === 'CLEAR_LOGS') { logs.length = 0; net.length = 0; reply({ ok: true }); }
   });
