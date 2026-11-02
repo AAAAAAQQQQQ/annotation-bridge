@@ -248,17 +248,19 @@ async function sendAll() {
 }
 
 // ── 消息 ──
+function buildMsg(m) {
+  const div = document.createElement('div');
+  div.className = `msg ${m.role}`;
+  const chain = m.tools?.length
+    ? `<div class="chain">${m.tools.map((t) => `<div class="call">→ <b>${esc(t.name)}</b> ${esc(t.args || '')}</div>`).join('')}</div>` : '';
+  div.innerHTML = `<div class="who">${m.role === 'assistant' ? esc(meta().label || tool) : '我'}</div>${esc(m.text)}${chain}`;
+  return div;
+}
+
 function appendMessages(list) {
   const box = $('messages');
   box.querySelector('.empty')?.remove();
-  for (const m of list) {
-    const div = document.createElement('div');
-    div.className = `msg ${m.role}`;
-    const chain = m.tools?.length
-      ? `<div class="chain">${m.tools.map((t) => `<div class="call">→ <b>${esc(t.name)}</b> ${esc(t.args || '')}</div>`).join('')}</div>` : '';
-    div.innerHTML = `<div class="who">${m.role === 'assistant' ? esc(meta().label || tool) : '我'}</div>${esc(m.text)}${chain}`;
-    box.appendChild(div);
-  }
+  for (const m of list) box.appendChild(buildMsg(m));
   box.scrollTop = box.scrollHeight;
 }
 
@@ -274,15 +276,62 @@ async function loadRecent() {
 
 function pollReply(since) {
   clearInterval(pollTimer);
-  let ticks = 0; const seen = new Set();
-  pollTimer = setInterval(async () => {
-    if (++ticks > 90) { clearInterval(pollTimer); return hint('sendHint', '停止等待（3 分钟）'); }
+  const seen = new Map();
+  const t0 = Date.now();
+  const box = $('messages');
+  box.querySelector('.empty')?.remove();
+  box.querySelectorAll('.livecard').forEach((n) => n.remove());
+  const card = document.createElement('div');
+  card.className = 'livecard';
+  box.appendChild(card);
+
+  const render = (msgs, sec, done) => {
+    const last = msgs[msgs.length - 1];
+    const tools = msgs.reduce((n, m) => n + (m.tools?.length || 0), 0);
+    const line = (last?.text || '').split('\n').find((x) => x.trim()) || '';
+    const short = line.length > 88 ? line.slice(0, 88) + '…' : line;
+    card.innerHTML = `
+      <div class="live ${done ? 'ok' : ''}">${done ? '✅ 完成' : '等待回复'} · ${sec}s${
+        done ? ` · ${msgs.length} 条 · ${tools} 次工具` : ''}</div>
+      ${done && short ? `<div class="live-sum">${esc(short)}</div>` : ''}
+      ${done && msgs.length ? '<button class="link live-more">展开全部</button>' : ''}`;
+    const more = card.querySelector('.live-more');
+    if (more) more.addEventListener('click', () => {
+      const d = card.querySelector('.live-detail');
+      if (d) { d.remove(); more.textContent = '展开全部'; return; }
+      const wrap = document.createElement('div');
+      wrap.className = 'live-detail';
+      msgs.forEach((m) => wrap.appendChild(buildMsg(m)));
+      card.appendChild(wrap);
+      more.textContent = '收起';
+    });
+  };
+
+  const tick = async () => {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    if (sec > 300) { clearInterval(pollTimer); render([...seen.values()], sec, true); return; }
+    render([...seen.values()], sec, false);
     try {
       const d = await api(`/reply?tool=${tool}&thread=${encodeURIComponent(selected.id)}&since=${since}`);
-      const fresh = (d.messages || []).filter((m) => m.role === 'assistant' && !seen.has(m.ts + m.text.slice(0, 16)));
-      if (fresh.length) { fresh.forEach((m) => seen.add(m.ts + m.text.slice(0, 16))); appendMessages(fresh); hint('sendHint', '收到回复', 'ok'); clearInterval(pollTimer); }
-    } catch {}
-  }, 2000);
+      let added = false;
+      for (const m of d.messages || []) {
+        if (m.role !== 'assistant') continue;
+        const k = m.ts + '|' + m.text.slice(0, 24);
+        if (seen.has(k)) continue;
+        seen.set(k, m); added = true;
+      }
+      if (added) {
+        render([...seen.values()], sec, true);
+        box.scrollTop = box.scrollHeight;
+        clearInterval(pollTimer);
+      }
+    } catch (e) {
+      clearInterval(pollTimer);
+      card.innerHTML = `<div class="live err">⚠ 读取回复失败 · ${esc(e.message)}</div>`;
+    }
+  };
+  tick();
+  pollTimer = setInterval(tick, 1500);
 }
 
 // ── 新建会话 ──
@@ -349,6 +398,12 @@ function bind() {
   $('btnClearCaps').addEventListener('click', () => { captures = []; renderCaps(); $('consoleCount').textContent = '0 条'; });
   $('capConsole').addEventListener('change', (e) => chrome.storage.local.set({ capConsole: e.target.checked }));
   $('btnQueue').addEventListener('click', addToQueue);
+  $('comment').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.isComposing) {
+      e.preventDefault();
+      addToQueue();
+    }
+  });
   $('btnSend').addEventListener('click', sendAll);
   $('btnLoadMsgs').addEventListener('click', loadRecent);
   $('btnClearQueue').addEventListener('click', async () => {
