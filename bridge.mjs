@@ -521,14 +521,37 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/queue' && req.method === 'GET') {
       const thread = u.searchParams.get('thread');
+      const tool = u.searchParams.get('tool');
+      if (!thread) return json(res, 400, { error: 'thread required（队列按会话隔离）' });
+      const q = loadQueue().filter((x) => x.thread === thread && (!tool || (x.tool || 'codex') === tool));
+      return json(res, 200, { queue: q });
+    }
+
+    // 每个会话的待发条数，供会话列表打角标
+    if (p === '/queue/summary' && req.method === 'GET') {
+      const out = {};
+      for (const it of loadQueue()) {
+        const k = `${it.tool || 'codex'}|${it.thread}`;
+        out[k] = (out[k] || 0) + 1;
+      }
+      return json(res, 200, { counts: out });
+    }
+
+    // 只删一条
+    if (p === '/queue/remove' && req.method === 'POST') {
+      const b = await readBody(req);
+      if (!b.id) return json(res, 400, { error: 'id required' });
       const q = loadQueue();
-      return json(res, 200, { queue: thread ? q.filter((x) => x.thread === thread) : q });
+      const rest = q.filter((x) => x.id !== b.id);
+      saveQueue(rest);
+      return json(res, 200, { removed: q.length - rest.length, left: rest.length });
     }
 
     if (p === '/queue/clear' && req.method === 'POST') {
       const b = await readBody(req);
+      if (!b.thread) return json(res, 400, { error: 'thread required（不支持清空全部）' });
       const q = loadQueue();
-      const rest = b.thread ? q.filter((x) => x.thread !== b.thread) : [];
+      const rest = q.filter((x) => !(x.thread === b.thread && (!b.tool || (x.tool || 'codex') === b.tool)));
       saveQueue(rest);
       return json(res, 200, { removed: q.length - rest.length });
     }
@@ -543,7 +566,7 @@ const server = http.createServer(async (req, res) => {
       const q = loadQueue();
       let mine = q.filter((x) => x.thread === b.thread && (x.tool || 'codex') === tool);
       if (b.ids?.length) mine = mine.filter((x) => b.ids.includes(x.id));
-      if (!mine.length) return json(res, 400, { error: '该会话的队列是空的' });
+      if (!mine.length) return json(res, 400, { error: '这个会话的队列是空的（队列按会话隔离）' });
 
       const session = sessionsCached(tool, 200).find((x) => x.id === b.thread) || {};
       const message = composeMessage(mine);

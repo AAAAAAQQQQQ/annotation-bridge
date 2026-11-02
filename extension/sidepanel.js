@@ -90,6 +90,11 @@ function updateSelectedUI() {
   t.textContent = selected.title || String(selected.id).slice(0, 8);
 }
 
+async function refreshSummary() {
+  try { qSummary = (await api('/queue/summary')).counts || {}; } catch { qSummary = {}; }
+  renderList();
+}
+
 function renderList() {
   const q = ($('search').value || '').trim().toLowerCase();
   const list = !q ? sessions : sessions.filter((s) => [s.title, s.project, s.id, s.cwd].join(' ').toLowerCase().includes(q));
@@ -97,7 +102,7 @@ function renderList() {
   if (!list.length) { box.innerHTML = `<div class="pop-empty">${sessions.length ? '没有匹配' : '还没有会话'}</div>`; return; }
   box.innerHTML = list.map((s) => `
     <div class="pop-item ${selected?.id === s.id ? 'active' : ''}" data-id="${s.id}">
-      <b>${esc(s.title || String(s.id).slice(0, 8))}</b>
+      <b>${esc(s.title || String(s.id).slice(0, 8))}${qSummary[`${tool}|${s.id}`] ? `<span class="badge">${qSummary[`${tool}|${s.id}`]}</span>` : ''}</b>
       <small>${esc(s.project || '')} · ${String(s.id).slice(0, 8)} · ${ago(s.mtime)}</small>
     </div>`).join('');
   box.querySelectorAll('.pop-item').forEach((el) => el.addEventListener('click', () => {
@@ -241,20 +246,27 @@ async function takeShot() {
 
 // ── 队列 ──
 async function loadQueue() {
-  if (!selected) { $('queueCount').textContent = '0'; $('queue').innerHTML = '<div class="empty">还没选会话</div>'; return; }
+  if (!selected) {
+    $('queueCount').textContent = '0'; $('fabCount').textContent = '0';
+    $('queue').innerHTML = '<div class="empty">还没选会话</div>';
+    return;
+  }
+  // 先清空，避免切换会话时闪出上一个会话的条目
+  $('queue').innerHTML = '<div class="empty">加载中…</div>';
   try {
-    const d = await api(`/queue?thread=${encodeURIComponent(selected.id)}`);
+    const d = await api(`/queue?thread=${encodeURIComponent(selected.id)}&tool=${tool}`);
     const q = d.queue || [];
     $('queueCount').textContent = String(q.length);
     $('fabCount').textContent = String(q.length);
     $('queue').innerHTML = q.length ? q.map((it) => `
-      <div class="qitem"><span class="x" data-del="1">✕</span>
+      <div class="qitem"><span class="x" data-del="${it.id}">✕</span>
         <div class="c">${esc(it.comment)}</div>
         <div class="s">${esc(it.selector || '(无选择器)')}</div></div>`).join('')
       : '<div class="empty">队列是空的</div>';
-    $('queue').querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', async () => {
-      await api('/queue/clear', { method: 'POST', body: JSON.stringify({ thread: selected.id }) });
-      await loadQueue();
+    $('queue').querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await api('/queue/remove', { method: 'POST', body: JSON.stringify({ id: el.dataset.del }) });
+      await loadQueue(); await refreshSummary();
     }));
   } catch (e) { hint('sendHint', '读队列失败：' + friendly(e), 'err'); }
 }
@@ -273,7 +285,7 @@ async function addToQueue() {
     captures = []; renderCaps();
     $('comment').value = ''; $('comment').focus();
     hint('sendHint', '已加入队列', 'ok');
-    await loadQueue();
+    await loadQueue(); await refreshSummary();
   } catch (e) { hint('sendHint', '入队失败：' + friendly(e), 'err'); }
 }
 
@@ -290,7 +302,7 @@ async function sendAll() {
     lastSend.count = d.count;
     if (d.dryRun) hint('sendHint', `DRY_RUN：已生成 ${d.count} 条，未真正投递`, 'ok');
     else hint('sendHint', `已投递 ${d.count} 条 · ${d.mode}${d.effort ? ' · ' + d.effort : ''}`, 'ok');
-    await loadQueue();
+    await loadQueue(); await refreshSummary();
     if (d.replyText) { appendMessages([{ role: 'assistant', text: d.replyText, tools: [] }]); hint('sendHint', '已返回结果', 'ok'); }
     else pollReply(startedAt);
   } catch (e) { hint('sendHint', '发送失败：' + friendly(e), 'err'); }
@@ -494,8 +506,8 @@ function bind() {
   $('btnLoadMsgs').addEventListener('click', loadRecent);
   $('btnClearQueue').addEventListener('click', async () => {
     if (!selected) return;
-    await api('/queue/clear', { method: 'POST', body: JSON.stringify({ thread: selected.id }) });
-    await loadQueue();
+    await api('/queue/clear', { method: 'POST', body: JSON.stringify({ thread: selected.id, tool }) });
+    await loadQueue(); await refreshSummary();
   });
   $('mode').addEventListener('change', syncOpts);
   $('model').addEventListener('change', () => { renderEfforts('model', 'effort'); syncOpts(); });
@@ -527,6 +539,7 @@ async function init() {
   grabConsole(true);
   if (st[K_THREAD] && st[K_THREAD].tool === tool) { selected = st[K_THREAD]; updateSelectedUI(); }
   await loadSessions();
+  await refreshSummary();
   await loadQueue();
 }
 
