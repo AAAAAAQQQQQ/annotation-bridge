@@ -28,12 +28,12 @@
   let marks = [];           // 屏幕上的编号标记
 
   const box = document.createElement('div');
-  box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #1f6feb;background:rgba(31,111,235,.12);border-radius:4px;display:none';
+  box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:1.5px dashed #1f6feb;background:rgba(31,111,235,.05);border-radius:4px;display:none';
   const tip = document.createElement('div');
   tip.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;background:#1f6feb;color:#fff;font:12px/1.5 -apple-system,PingFang SC,sans-serif;padding:3px 8px;border-radius:4px;max-width:520px;display:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   const banner = document.createElement('div');
   banner.style.cssText = 'position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:2147483647;background:#111827;color:#fff;font:13px/1.6 -apple-system,PingFang SC,sans-serif;padding:8px 16px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.3);display:none';
-  banner.textContent = '拾取模式：点击元素可多选（再点取消），Enter 完成 · Esc 退出';
+  banner.textContent = '拾取模式：移动预览（虚线）· 点击选中（实线+编号）· Enter 完成 · Esc 退出';
 
   const mount = () => { if (!box.isConnected) document.documentElement.append(box, tip, banner); };
   const unmount = () => [box, tip, banner].forEach((n) => n.remove());
@@ -112,7 +112,7 @@
   function updateBanner() {
     banner.textContent = picked.length
       ? `拾取模式：已选 ${picked.length} 个 · 再点一次取消 · Enter 完成 · Esc 退出`
-      : '拾取模式：点击元素可多选（再点取消），Enter 完成 · Esc 退出';
+      : '拾取模式：移动预览（虚线）· 点击选中（实线+编号）· Enter 完成 · Esc 退出';
   }
   function drawMarks() {
     clearMarks();
