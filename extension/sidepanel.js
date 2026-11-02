@@ -123,8 +123,13 @@ function ago(ms) {
 
 // ── 工具页签 ──
 function renderTabs() {
-  $('toolTabs').innerHTML = tools.map((t) => `
-    <div class="tool ${t.id === tool ? 'active' : ''} ${t.available ? '' : 'off'}" data-id="${t.id}"
+  const usable = tools.filter((t) => t.available);
+  if (!usable.length) {
+    $('toolTabs').innerHTML = '<div class="tool off" style="cursor:default">没有可用的 CLI</div>';
+    return;
+  }
+  $('toolTabs').innerHTML = usable.map((t) => `
+    <div class="tool ${t.id === tool ? 'active' : ''}" data-id="${t.id}"
          title="${esc(t.note || '')}">${esc(t.label)}</div>`).join('');
   $('toolTabs').querySelectorAll('.tool').forEach((el) => el.addEventListener('click', async () => {
     const m = tools.find((x) => x.id === el.dataset.id);
@@ -241,7 +246,14 @@ function syncOpts() {
 const activeTab = () => new Promise((r) => chrome.runtime.sendMessage({ type: 'GET_ACTIVE_TAB' }, r));
 async function ensureContent(tabId) {
   try { await chrome.tabs.sendMessage(tabId, { type: 'PING' }); return true; }
-  catch { try { await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }); return true; } catch { return false; } }
+  catch {
+    try {
+      // 页面是在扩展加载前打开的：补注入。日志只对之后的输出有效。
+      try { await chrome.scripting.executeScript({ target: { tabId }, files: ['inject-console.js'], world: 'MAIN' }); } catch {}
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+      return true;
+    } catch { return false; }
+  }
 }
 async function startPick() {
   const tab = await activeTab();
@@ -251,19 +263,68 @@ async function startPick() {
   hint('sendHint', '已进入拾取模式：回页面点一个元素，Esc 取消');
 }
 function renderPicked() {
-  if (!picked || !picked.length) { $('pickedBox').classList.add('hidden'); $('pickedBox').innerHTML = ''; return; }
-  $('pickedBox').classList.remove('hidden');
-  $('pickedBox').innerHTML = picked.map((el, i) => `
-    <div class="pick-row">
-      <span class="num">${i + 1}</span>
-      <span class="pick-sel" title="${esc(el.selector)}">${esc(el.selector)}</span>
-      <span class="x" data-i="${i}">✕</span>
-    </div>`).join('');
-  $('pickedBox').querySelectorAll('.x').forEach((x) => x.addEventListener('click', (e) => {
+  const box = $('pickedBox');
+  if (!box) return;
+  if (!picked || !picked.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <div class="picked-head">
+      <span>已选 <b>${picked.length}</b> 个元素</span>
+      <button class="link" id="btnClearPicked">清空</button>
+    </div>
+    ${picked.map((el, i) => `
+      <div class="pick-row">
+        <span class="num">${i + 1}</span>
+        <div class="pick-body">
+          <code class="pick-sel" title="${esc(el.selector)}">${esc(el.selector)}</code>
+          ${el.text ? `<small class="pick-txt">${esc(String(el.text).slice(0, 70))}</small>` : ''}
+        </div>
+        <span class="pick-locate" data-i="${i}" title="在页面上标出这个元素">定位</span>
+        <span class="x" data-i="${i}" title="从选择里移除">✕</span>
+      </div>`).join('')}`;
+  box.querySelectorAll('.x').forEach((x) => x.addEventListener('click', (e) => {
     e.stopPropagation();
-    picked.splice(Number(x.dataset.i), 1);
-    renderPicked();
+    removePick(Number(x.dataset.i));
   }));
+  box.querySelectorAll('.pick-locate').forEach((x) => x.addEventListener('click', (e) => {
+    e.stopPropagation();
+    locatePick(Number(x.dataset.i));
+  }));
+  $('btnClearPicked')?.addEventListener('click', (e) => { e.stopPropagation(); clearPicked(); });
+}
+
+/** 面板里删掉一个元素时，页面那边的 picked 也要删，否则下次一选又回来 */
+async function removePick(i) {
+  const el = picked[i];
+  if (!el) return;
+  picked.splice(i, 1);
+  renderPicked();
+  const tab = await activeTab();
+  if (!tab?.tabId) return;
+  try {
+    const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'REMOVE_PICK', selector: el.selector });
+    if (Array.isArray(r?.items)) { picked = r.items; renderPicked(); }
+  } catch { /* 页面没注入脚本就只改面板这边 */ }
+}
+
+async function clearPicked() {
+  picked = [];
+  renderPicked();
+  const tab = await activeTab();
+  if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'CLEAR_PICKS' }).catch(() => {});
+}
+
+async function locatePick(i) {
+  const el = picked[i];
+  if (!el) return;
+  const tab = await activeTab();
+  if (!tab?.tabId) return;
+  try {
+    await chrome.tabs.sendMessage(tab.tabId, { type: 'FLASH', selector: el.selector });
+    hint('sendHint', '已在页面上标出这个元素（黄框）', 'ok');
+  } catch {
+    hint('sendHint', '页面还没注入脚本 · 刷新一下页面', 'err');
+  }
 }
 
 // ── 采集附件 ──
@@ -325,25 +386,49 @@ function renderCaps() {
   }));
 }
 
+function setConsoleCount(text, title = '') {
+  const el = $('consoleCount');
+  if (!el) return;
+  el.textContent = text;
+  el.title = title;
+}
+
+/** 面板开着的时候每 3 秒看一眼：有多少日志、脚本有没有注入 */
+async function refreshConsoleCount() {
+  if (!($('capConsole')?.checked)) return setConsoleCount('已关闭', '勾上「带上页面日志」就会随标注一起发送');
+  const tab = await activeTab();
+  if (!tab?.tabId) return setConsoleCount('没有可用的页面');
+  try {
+    const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'GET_LOGS' });
+    const n = r?.total ?? 0;
+    const netFail = (r?.net || []).filter((x) => !x.ok).length;
+    setConsoleCount(n ? `${n} 条${netFail ? ` · 网络失败 ${netFail}` : ''}` : '0 条',
+      n ? '' : '这个页面还没记录到日志。页面是在扩展加载前打开的，刷新一下就会开始捕获。');
+  } catch {
+    setConsoleCount('未注入', '这个页面是在扩展加载前打开的：点「读取日志」或刷新页面就能开始捕获。');
+  }
+}
+
 async function grabConsole(silent) {
   const tab = await activeTab();
-  if (!tab?.tabId) return;
+  if (!tab?.tabId) { if (!silent) hint('sendHint', '没有可用的页面', 'err'); return; }
   if (!(await ensureContent(tab.tabId))) {
     if (!silent) hint('sendHint', '这个页面不允许注入脚本（chrome:// 或扩展页）', 'err');
     return;
   }
   try {
     const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'GET_LOGS' });
-    const netFail = (r?.net || []).filter((n) => !n.ok).length;
-    $('consoleCount').textContent = `${r?.total ?? 0} 条${netFail ? ` · 网络失败 ${netFail}` : ''}`;
+    const n = r?.total ?? 0;
+    const netFail = (r?.net || []).filter((x) => !x.ok).length;
+    setConsoleCount(n ? `${n} 条${netFail ? ` · 网络失败 ${netFail}` : ''}` : '0 条');
     if (!silent) {
-      if (!r?.total) return hint('sendHint', '这个页面还没有捕获到日志', '');
+      if (!n) return hint('sendHint', '这个页面还没记录到日志 · 刚注入的话，刷新页面后再试', '');
       const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'console', logs: r.logs, net: r.net }) });
       captures.push({ kind: 'console', id: d.id, count: d.count, netCount: d.netCount || 0, path: d.path, url: d.url, preview: d.preview });
       renderCaps();
       hint('sendHint', `已附上 ${d.count} 条日志 · ${d.netCount || 0} 个请求`, 'ok');
     }
-  } catch (e) { if (!silent) hint('sendHint', '抓取失败：' + friendly(e), 'err'); }
+  } catch (e) { if (!silent) hint('sendHint', '读取失败：' + friendly(e), 'err'); }
 }
 
 
@@ -725,8 +810,8 @@ function bind() {
   $('btnShot').addEventListener('click', takeShot);
   bindEditor();
   $('btnGrabLogs').addEventListener('click', () => grabConsole(false));
-  $('btnClearCaps').addEventListener('click', () => { captures = []; renderCaps(); $('consoleCount').textContent = '0 条'; });
-  $('capConsole').addEventListener('change', (e) => chrome.storage.local.set({ capConsole: e.target.checked }));
+  $('btnClearCaps').addEventListener('click', () => { captures = []; renderCaps(); });
+  $('capConsole').addEventListener('change', (e) => { chrome.storage.local.set({ capConsole: e.target.checked }); refreshConsoleCount(); });
   $('btnQueue').addEventListener('click', addToQueue);
   $('comment').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.isComposing) {
@@ -773,7 +858,8 @@ async function init() {
   renderTabs(); renderOpts(); renderCaps();
   const pref = await chrome.storage.local.get(['capConsole']);
   if (pref.capConsole === false) $('capConsole').checked = false;
-  grabConsole(true);
+  refreshConsoleCount();
+  setInterval(refreshConsoleCount, 3000);
   if (st[K_THREAD] && st[K_THREAD].tool === tool) { selected = st[K_THREAD]; updateSelectedUI(); }
   await loadSessions();
   await refreshSummary();

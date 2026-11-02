@@ -49,9 +49,14 @@ chrome.runtime.onInstalled.addListener(() => { try { getPort(); } catch {} });
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg?.type === 'GET_ACTIVE_TAB') {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const t = tabs[0];
-      reply(t ? { tabId: t.id, url: t.url, title: t.title } : null);
+    // 不能用 active:true 直接拿：面板本身如果是独立窗口/标签页，
+    // 它自己就是 active tab，会把“选元素”注入到自己身上。
+    chrome.tabs.query({}, (tabs) => {
+      const pages = (tabs || []).filter((t) => t.url && /^https?:\/\//.test(t.url));
+      if (!pages.length) return reply(null);
+      const active = pages.filter((t) => t.active).sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+      const t = active[0] || pages.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+      reply({ tabId: t.id, url: t.url, title: t.title });
     });
     return true;
   }
@@ -82,8 +87,9 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     const onDisc = () => {
       const err = chrome.runtime.lastError?.message || 'native host 断开';
       if (nativePort === port) nativePort = null;
-      const neverSent = !sent;
-      done(neverSent ? { native: false, error: err } : { native: true, status: 599, data: { error: `原生宿主中断：${err}` } });
+      // 宿主压根没装：可以直接回退 HTTP（请求没被处理过，不会重复投递）
+      const neverStarted = !sent || /not found|找不到|not installed/i.test(err);
+      done(neverStarted ? { native: false, error: err } : { native: true, status: 599, data: { error: `原生宿主中断：${err}` } });
     };
     const timer = setTimeout(() => done({ native: true, status: 599, data: { error: '原生宿主 15 分钟没有返回' } }), REQUEST_TIMEOUT);
 

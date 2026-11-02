@@ -187,12 +187,18 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .console-chip{cursor:pointer}
 .console-chip:hover{filter:brightness(1.08)}
 
+.picked-head{display:flex;align-items:center;justify-content:space-between;font-size:11.5px;color:var(--muted);padding-bottom:2px}
+.picked-head b{color:var(--ink)}
 .pick-row{display:flex;align-items:center;gap:7px;padding:4px 0}
 .pick-row .num{flex:none;width:16px;height:16px;border-radius:50%;background:var(--accent);color:#fff;
   font-size:10px;line-height:16px;text-align:center}
-.pick-sel{flex:1;min-width:0;font:11.5px ui-monospace,Menlo,monospace;color:var(--accent);
+.pick-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.pick-sel{min-width:0;font:11.5px ui-monospace,Menlo,monospace;color:var(--accent);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pick-row .x{color:var(--faint);cursor:pointer;font-size:11px}
+.pick-txt{color:var(--muted);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick-locate{flex:none;font-size:11px;color:var(--accent);cursor:pointer;padding:0 2px;opacity:.85}
+.pick-locate:hover{opacity:1;text-decoration:underline}
+.pick-row .x{flex:none;color:var(--faint);cursor:pointer;font-size:11px}
 .pick-row .x:hover{color:var(--red)}
 
 .ed-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap}

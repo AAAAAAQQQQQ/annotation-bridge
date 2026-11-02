@@ -250,6 +250,7 @@ node test/probe.mjs
 ```bash
 node test/native-probe.mjs       # 宿主拉起 bridge + 面板走原生通道
 node test/open-panel-probe.mjs   # 桌面 app 的「打开面板」整条链路
+node test/pick-probe.mjs         # 独立窗口里选元素：列表、定位、✕ 同步删除
 ```
 
 两个脚本都会自己起一个隔离端口的 bridge + 全新 Chrome profile，不会碰你正在用的服务。
@@ -330,6 +331,15 @@ launchctl bootout gui/$(id -u)/com.gjr.annotation-bridge
 
 一次标注可以覆盖多个元素：进入拾取模式后**连续点击**要标注的元素，每个元素会打上编号；再点一次取消，**Enter** 结束。
 
+面板里会实时列出「已选 N 个元素」，每行都有：
+
+- 选择器 + 元素文本（是哪个元素一目了然）
+- **定位** —— 在页面上黄框闪一下并滚动到它，确认选对了没有
+- **✕** —— 从面板和页面里同时删掉（不会下次又冒出来）
+- **清空** —— 一次全清
+
+切换会话不会丢掉已选元素。
+
 投递出去长这样：
 
 ```markdown
@@ -359,7 +369,7 @@ cd ~/Project/annotation-bridge && ./app/build.sh
 
 - 顶部是状态：**绿点** = 服务在跑且扩展已连上，**橙点** = 服务在跑但扩展没连，**灰点** = 服务停了
 - **打开标注面板** —— 让 Chrome 里的扩展弹出一个独立的 440×940 面板窗口（不是标签页）
-- 启动 / 停止 / 重启服务，复制服务地址
+- 启动 / 停止 / 重启服务，复制服务地址（服务意外挂了会在 10 秒内自动拉回来；点「停止」后不打扰）
 - 打开日志、打开项目目录、重新安装原生宿主
 - 登录时自动启动（写一个 LaunchAgent）
 
@@ -390,6 +400,7 @@ APP="$HOME/Applications/标注投递.app/Contents/MacOS/AnnotationBridge"
 
 - **控制台 + 网络**：`inject-console.js` 在**主世界**（`world: MAIN`）包装 `console.log/info/warn/error`、`fetch`、`XMLHttpRequest`，
   以及 `error` / `unhandledrejection`，通过 `postMessage` 转给隔离世界的内容脚本。网络记录含方法、URL、状态码、耗时，
-  4xx/5xx 会带一段响应片段，并监听 `window.onerror` 与 `unhandledrejection`，保留最近 200 条。面板里点「抓取」会把日志存到 `~/.annotation-bridge/captures/<id>.json`，随标注一起投递（消息里带错误/warn 摘要）。
+  4xx/5xx 会带一段响应片段，并监听 `window.onerror` 与 `unhandledrejection`，保留最近 200 条。面板里点「读取日志」会把日志存到 `~/.annotation-bridge/captures/<id>.json`，随标注一起投递（消息里带错误/warn 摘要）。
+计数每 3 秒自动刷新；如果显示「未注入」，说明这个页面是在扩展加载前打开的——点「读取日志」会补注入（只对之后的输出有效），刷新页面则能从开头捕获。
 - **截图**：`chrome.tabs.captureVisibleTab` 抓当前可见区域，存成 PNG，路径写进投递消息。
 - 两条都会作为「附件」挂在标注上，入队后清空。

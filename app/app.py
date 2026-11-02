@@ -202,6 +202,41 @@ def cli(flag, s):
         sys.exit(2)
 
 
+# ── 图标 ─────────────────────────────────────────────
+
+def status_symbol():
+    """菜单栏主图标：SF Symbol，template 模式，明暗模式都自适应。"""
+    from AppKit import NSImage
+    img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("text.bubble", "标注投递")
+    if img is not None:
+        img.setTemplate_(True)
+    return img
+
+
+def status_color(dot):
+    from AppKit import NSColor
+    return {"green": NSColor.systemGreenColor(),
+            "orange": NSColor.systemOrangeColor()}.get(dot, NSColor.systemGrayColor())
+
+
+def notify_once(text, title):
+    """第一次启动提示一下图标在菜单栏，别让人找不到。12 小时内只弹一次。"""
+    stamp = os.path.join(HOME, ".annotation-bridge", ".app-notified")
+    try:
+        if time.time() - os.path.getmtime(stamp) < 12 * 3600:
+            return
+    except OSError:
+        pass
+    try:
+        subprocess.Popen(["/usr/bin/osascript", "-e",
+                          'display notification "%s" with title "%s"' % (text, title)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.makedirs(os.path.dirname(stamp), exist_ok=True)
+        open(stamp, "w").close()
+    except Exception:
+        pass
+
+
 # ── GUI ─────────────────────────────────────────────
 
 def gui(s):
@@ -226,6 +261,9 @@ def gui(s):
             self.pending = 0
             self.ticks = 0
             self._polling = False
+            self.manual_stop = False
+            self._auto_at = 0
+            self._starting = False
             self.status_item = None
             self.menu = None
             self._icons = {}
@@ -243,6 +281,7 @@ def gui(s):
             if self.health is None:
                 threading.Thread(target=self.boot_start, daemon=True).start()
             alog("GUI 启动，菜单栏图标已创建")
+            notify_once("图标在屏幕右上角菜单栏 · 点开可以打开标注面板", "标注投递 已启动")
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 2.0, self, "tick:", None, True)
 
@@ -274,9 +313,24 @@ def gui(s):
                 p = pending_count(self.settings) if (h and self.ticks % 3 == 0) else self.pending
                 if h is None:
                     p = 0
+                    if not self.manual_stop:
+                        self._auto_start()
             finally:
                 self._polling = False
             AppHelper.callAfter(self._apply, h, p)
+
+        @objc.python_method
+        def _auto_start(self):
+            """服务意外挂了（比如被 pkill 了）自己拉回来；用户点「停止」时不打扰。"""
+            if self._starting or time.time() - self._auto_at < 10:
+                return
+            self._auto_at = time.time()
+            self._starting = True
+            try:
+                alog("服务不在，自动拉起")
+                start_bridge(self.settings)
+            finally:
+                self._starting = False
 
         @objc.python_method
         def _apply(self, h, p):
@@ -294,33 +348,23 @@ def gui(s):
             if h is not None:
                 dot = "green" if h.get("extension") else "orange"
             try:
-                self.status_item.button().setImage_(self.icon(dot))
-            except Exception:
-                pass
+                from AppKit import NSFont, NSAttributedString, NSFontAttributeName, NSForegroundColorAttributeName
+                btn = self.status_item.button()
+                sym = status_symbol()
+                if sym is not None and btn.image() is None:
+                    btn.setImage_(sym)
+                    btn.setImagePosition_(2)      # 图标在文字左边
+                    btn.setImageScaling_(2)       # 等比缩小
+                label = " ●" if sym is not None else "标注 ●"
+                attrs = {
+                    NSFontAttributeName: NSFont.systemFontOfSize_(9),
+                    NSForegroundColorAttributeName: status_color(dot),
+                }
+                btn.setAttributedTitle_(NSAttributedString.alloc().initWithString_attributes_(label, attrs))
+            except Exception as e:
+                alog("设置图标失败: %r" % (e,))
 
         # 图标
-        @objc.python_method
-        def icon(self, dot):
-            if dot in self._icons:
-                return self._icons[dot]
-            size = NSMakeSize(22, 20)
-            img = NSImage.alloc().initWithSize_(size)
-            img.lockFocus()
-            cfg = NSImageSymbolConfiguration.configurationWithPaletteColors_([NSColor.labelColor()])
-            sym = NSImage.imageWithSystemSymbolName_accessibilityDescription_("text.bubble", "标注投递")
-            if sym is not None:
-                sym = sym.imageWithSymbolConfiguration_(cfg) or sym
-                sym.drawInRect_(NSMakeRect(0, 2, 18, 17))
-            color = {"green": NSColor.systemGreenColor(),
-                     "orange": NSColor.systemOrangeColor(),
-                     "gray": NSColor.systemGrayColor()}.get(dot, NSColor.systemGrayColor())
-            color.setFill()
-            NSBezierPath.bezierPathWithOvalInRect_(NSMakeRect(14, 0.5, 7, 7)).fill()
-            img.unlockFocus()
-            img.setTemplate_(False)
-            self._icons[dot] = img
-            return img
-
         # 菜单
         @objc.python_method
         def render(self):
@@ -406,15 +450,18 @@ def gui(s):
                 "然后在 Chrome 工具栏点一下扩展图标。")
 
         def startAction_(self, _sender):
+            self.manual_stop = False
             if not start_bridge(self.settings):
                 self.alert("启动失败", "看看日志：\n" + self.settings.log_path)
             self.tick_now()
 
         def stopAction_(self, _sender):
+            self.manual_stop = True
             stop_bridge(self.settings)
             self.tick_now()
 
         def restartAction_(self, _sender):
+            self.manual_stop = False
             stop_bridge(self.settings)
             start_bridge(self.settings)
             self.tick_now()
@@ -509,7 +556,11 @@ def selftest(s):
         menu.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(name, None, ""))
     item.setMenu_(menu)
     titles = [menu.itemAtIndex_(i).title() for i in range(menu.numberOfItems())]
-    print(json.dumps({"ok": True, "menu": titles, "health": health(s)}, ensure_ascii=False))
+    sym = status_symbol()
+    print(json.dumps({"ok": True, "menu": titles, "health": health(s),
+                      "symbol": sym is not None,
+                      "symbolSize": [sym.size().width, sym.size().height] if sym is not None else None},
+                     ensure_ascii=False))
     NSStatusBar.systemStatusBar().removeStatusItem_(item)
 
 

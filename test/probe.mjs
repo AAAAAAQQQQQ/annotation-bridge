@@ -128,8 +128,9 @@ await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 200, y: 232, 
 await sleep(1200);
 
 const picked = await evalIn(pSid, `JSON.stringify({
-  selector: document.querySelector('#pickedSel')?.textContent || '',
-  text: document.querySelector('#pickedTxt')?.textContent || '',
+  selector: document.querySelector('#pickedBox .pick-sel')?.textContent || '',
+  text: document.querySelector('#pickedBox .pick-txt')?.textContent || '',
+  rows: document.querySelectorAll('#pickedBox .pick-row').length,
   hint: document.getElementById('sendHint')?.textContent || ''
 })`);
 console.log('   拾取结果回传面板:', picked);

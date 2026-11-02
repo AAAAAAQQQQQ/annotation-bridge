@@ -92,9 +92,10 @@
     tip.style.left = Math.max(8, r.left) + 'px';
     tip.style.top = Math.max(8, r.top - 26) + 'px';
   };
-  function addMark(el, n) {
+  function addMark(el, n, selector) {
     const r = el.getBoundingClientRect();
     const m = document.createElement('div');
+    m.title = selector || '';
     m.style.cssText = `position:fixed;pointer-events:none;z-index:2147483647;
       left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;
       border:2px solid #1f6feb;border-radius:4px;background:rgba(31,111,235,.10)`;
@@ -108,6 +109,36 @@
   }
   function clearMarks() { marks.forEach((m) => m.remove()); marks = []; }
 
+  function updateBanner() {
+    banner.textContent = picked.length
+      ? `拾取模式：已选 ${picked.length} 个 · 再点一次取消 · Enter 完成 · Esc 退出`
+      : '拾取模式：点击元素可多选（再点取消），Enter 完成 · Esc 退出';
+  }
+  function drawMarks() {
+    clearMarks();
+    picked.forEach((x, i) => {
+      const node = document.querySelector(x.selector);
+      if (node) addMark(node, i + 1, x.selector);
+    });
+    updateBanner();
+  }
+
+  // 面板里点「定位」时闪一下这个元素，方便确认选的是不是对的
+  function flash(selector) {
+    const node = document.querySelector(selector);
+    if (!node) return;
+    node.scrollIntoView({ block: 'center' });
+    const r = node.getBoundingClientRect();
+    const f = document.createElement('div');
+    f.style.cssText = `position:fixed;pointer-events:none;z-index:2147483647;
+      left:${r.left - 3}px;top:${r.top - 3}px;width:${r.width + 6}px;height:${r.height + 6}px;
+      border:3px solid #f59e0b;border-radius:6px;box-shadow:0 0 0 4px rgba(245,158,11,.25);
+      transition:opacity .5s`;
+    document.documentElement.appendChild(f);
+    setTimeout(() => { f.style.opacity = '0'; }, 900);
+    setTimeout(() => f.remove(), 1500);
+  }
+
   const onClick = (e) => {
     if (!picking) return;
     e.preventDefault(); e.stopPropagation();
@@ -117,11 +148,7 @@
     const idx = picked.findIndex((x) => x.selector === info.selector);
     if (idx >= 0) { picked.splice(idx, 1); }
     else { picked.push(info); }
-    clearMarks();
-    picked.forEach((x, i) => {
-      const node = document.querySelector(x.selector);
-      if (node) addMark(node, i + 1);
-    });
+    drawMarks();
     chrome.runtime.sendMessage({ type: 'ELEMENT_PICKED', payload: { multi: true, items: picked } }).catch(() => {});
   };
   const onKey = (e) => {
@@ -134,6 +161,8 @@
   function startPick() {
     picking = true; mount();
     banner.style.display = 'block';
+    updateBanner();
+    drawMarks();            // 上次选过的元素，重新进拾取模式也画出来
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('click', onClick, true);
     document.addEventListener('keydown', onKey, true);
@@ -154,7 +183,13 @@
     if (msg?.type === 'PING') reply({ ok: true });
     if (msg?.type === 'GET_LOGS') reply({ ok: true, logs: logs.slice(-80), total: logs.length, net: net.slice(-50) });
     if (msg?.type === 'GET_PICKS') reply({ ok: true, items: picked });
-    if (msg?.type === 'CLEAR_PICKS') { picked = []; clearMarks(); reply({ ok: true }); }
+    if (msg?.type === 'REMOVE_PICK') {
+      picked = picked.filter((x) => x.selector !== msg.selector);
+      drawMarks();
+      reply({ ok: true, items: picked });
+    }
+    if (msg?.type === 'FLASH') { flash(msg.selector); reply({ ok: true }); }
+    if (msg?.type === 'CLEAR_PICKS') { picked = []; clearMarks(); updateBanner(); reply({ ok: true }); }
     if (msg?.type === 'CLEAR_LOGS') { logs.length = 0; net.length = 0; reply({ ok: true }); }
   });
 })();

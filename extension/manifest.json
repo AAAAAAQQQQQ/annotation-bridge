@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "标注投递 · Codex",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "在网页上标注元素并写评论，排队后一次性投递到指定的 Codex 会话，并显示它的回复。",
   "permissions": [
     "sidePanel",
