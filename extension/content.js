@@ -24,6 +24,8 @@
   // 拾取
   let picking = false;
   let hoverEl = null;
+  let picked = [];          // 已选元素（多选）
+  let marks = [];           // 屏幕上的编号标记
 
   const box = document.createElement('div');
   box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #1f6feb;background:rgba(31,111,235,.12);border-radius:4px;display:none';
@@ -31,7 +33,7 @@
   tip.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;background:#1f6feb;color:#fff;font:12px/1.5 -apple-system,PingFang SC,sans-serif;padding:3px 8px;border-radius:4px;max-width:520px;display:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   const banner = document.createElement('div');
   banner.style.cssText = 'position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:2147483647;background:#111827;color:#fff;font:13px/1.6 -apple-system,PingFang SC,sans-serif;padding:8px 16px;border-radius:999px;box-shadow:0 6px 24px rgba(0,0,0,.3);display:none';
-  banner.textContent = '拾取模式：点击要标注的元素，Esc 退出';
+  banner.textContent = '拾取模式：点击元素可多选（再点取消），Enter 完成 · Esc 退出';
 
   const mount = () => { if (!box.isConnected) document.documentElement.append(box, tip, banner); };
   const unmount = () => [box, tip, banner].forEach((n) => n.remove());
@@ -90,12 +92,37 @@
     tip.style.left = Math.max(8, r.left) + 'px';
     tip.style.top = Math.max(8, r.top - 26) + 'px';
   };
+  function addMark(el, n) {
+    const r = el.getBoundingClientRect();
+    const m = document.createElement('div');
+    m.style.cssText = `position:fixed;pointer-events:none;z-index:2147483647;
+      left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;
+      border:2px solid #1f6feb;border-radius:4px;background:rgba(31,111,235,.10)`;
+    const tag = document.createElement('div');
+    tag.textContent = String(n);
+    tag.style.cssText = `position:absolute;left:-9px;top:-9px;width:18px;height:18px;border-radius:50%;
+      background:#1f6feb;color:#fff;font:11px/18px -apple-system,PingFang SC,sans-serif;text-align:center`;
+    m.appendChild(tag);
+    document.documentElement.appendChild(m);
+    marks.push(m);
+  }
+  function clearMarks() { marks.forEach((m) => m.remove()); marks = []; }
+
   const onClick = (e) => {
     if (!picking) return;
     e.preventDefault(); e.stopPropagation();
-    const info = describe(e.target);
-    stopPick();
-    chrome.runtime.sendMessage({ type: 'ELEMENT_PICKED', payload: info }).catch(() => {});
+    const el = e.target;
+    const info = describe(el);
+    // 同一个元素重复点 = 取消
+    const idx = picked.findIndex((x) => x.selector === info.selector);
+    if (idx >= 0) { picked.splice(idx, 1); }
+    else { picked.push(info); }
+    clearMarks();
+    picked.forEach((x, i) => {
+      const node = document.querySelector(x.selector);
+      if (node) addMark(node, i + 1);
+    });
+    chrome.runtime.sendMessage({ type: 'ELEMENT_PICKED', payload: { multi: true, items: picked } }).catch(() => {});
   };
   const onKey = (e) => {
     if (e.key === 'Escape' && picking) {
@@ -113,6 +140,7 @@
   }
   function stopPick() {
     picking = false; hoverEl = null;
+    clearMarks();
     document.removeEventListener('mousemove', onMove, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('keydown', onKey, true);
@@ -125,6 +153,8 @@
     if (msg?.type === 'STOP_PICK') { stopPick(); reply({ ok: true }); }
     if (msg?.type === 'PING') reply({ ok: true });
     if (msg?.type === 'GET_LOGS') reply({ ok: true, logs: logs.slice(-80), total: logs.length, net: net.slice(-50) });
+    if (msg?.type === 'GET_PICKS') reply({ ok: true, items: picked });
+    if (msg?.type === 'CLEAR_PICKS') { picked = []; clearMarks(); reply({ ok: true }); }
     if (msg?.type === 'CLEAR_LOGS') { logs.length = 0; net.length = 0; reply({ ok: true }); }
   });
 })();

@@ -400,8 +400,16 @@ function composeMessage(items) {
   const url = items[0]?.url || '';
   const out = [`【网页标注 · ${items.length} 条】${url ? ' 来源：' + url : ''}`, '', '我在页面上标了下面几处，请按选择器定位代码后逐条修改：', ''];
   items.forEach((it, i) => {
-    out.push(`${i + 1}. \`${it.selector || '(未取到选择器)'}\``);
-    if (it.text) out.push(`   元素文本：${it.text.slice(0, 120)}`);
+    const els = (it.elements && it.elements.length) ? it.elements : [{ selector: it.selector, text: it.text }];
+    if (els.length === 1) {
+      out.push(`${i + 1}. \`${els[0].selector || '(未取到选择器)'}\``);
+      if (els[0].text) out.push(`   元素文本：${els[0].text.slice(0, 120)}`);
+    } else {
+      out.push(`${i + 1}. 涉及 ${els.length} 个元素：`);
+      els.forEach((e, j) => {
+        out.push(`   ${j + 1}) \`${e.selector || '(无)'}\`${e.text ? ` — ${e.text.slice(0, 60)}` : ''}`);
+      });
+    }
     if (it.severity) out.push(`   严重度：${it.severity}`);
     out.push(`   备注：${it.comment}`);
     for (const c of it.captures || []) {
@@ -536,6 +544,7 @@ const server = http.createServer(async (req, res) => {
         selector: b.selector || '', text: b.text || '', url: b.url || '',
         severity: b.severity || 'important', createdAt: Date.now(),
         captures: Array.isArray(b.captures) ? b.captures : [],
+        elements: Array.isArray(b.elements) ? b.elements : [],
       };
       q.push(item); saveQueue(q);
       return json(res, 200, { item, count: q.length });
@@ -602,7 +611,7 @@ const server = http.createServer(async (req, res) => {
         saveQueue(q.filter((x) => !mine.some((m) => m.id === x.id)));
         return json(res, 200, { ok: true, tool, count: mine.length, startedAt, message, ...r });
       } catch (e) {
-        return json(res, 502, { ok: false, tool, count: mine.length, startedAt, error: String(e?.stderr || e?.message || e).slice(0, 1200) });
+        return json(res, 502, { ok: false, tool, count: mine.length, startedAt, message, error: String(e?.stderr || e?.message || e).slice(0, 1200) });
       }
     }
 

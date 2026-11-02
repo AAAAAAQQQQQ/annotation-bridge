@@ -102,6 +102,27 @@
     </div>
   </div>
 
+  <!-- 截图标注 -->
+  <div class="modal hidden" id="shotModal">
+    <div class="sheet">
+      <div class="sheet-head"><b>标注截图</b><button class="ghost icon" id="btnEdClose">✕</button></div>
+      <div class="ed-tools">
+        <button class="ed-tool" data-tool="rect">▭ 矩形</button>
+        <button class="ed-tool" data-tool="ellipse">◯ 圈</button>
+        <button class="ed-tool" data-tool="arrow">↗ 箭头</button>
+        <button class="ed-tool" data-tool="text">T 文字</button>
+        <input type="color" id="edColor" value="#ff3b30" title="颜色" />
+        <button class="link" id="btnEdUndo">撤销</button>
+      </div>
+      <input id="edText" class="input sm hidden" placeholder="输入要标注的文字，然后点图上位置" />
+      <div class="ed-canvas-wrap"><canvas id="edCanvas"></canvas></div>
+      <div class="row">
+        <button class="secondary block" id="btnEdCancel">取消</button>
+        <button class="primary block" id="btnEdSave">保存标注</button>
+      </div>
+    </div>
+  </div>
+
   <script src="sidepanel.js"></script>
 </body>
 </html>

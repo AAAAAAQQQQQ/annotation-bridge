@@ -257,6 +257,25 @@ launchctl bootout gui/$(id -u)/com.gjr.annotation-bridge
 
 日志：`~/Library/Logs/annotation-bridge.log` 和 `.err.log`
 
+## 多选元素
+
+一次标注可以覆盖多个元素：进入拾取模式后**连续点击**要标注的元素，每个元素会打上编号；再点一次取消，**Enter** 结束。
+
+投递出去长这样：
+
+```markdown
+1. 涉及 3 个元素：
+   1) `div.card:nth-of-type(1)` — 卡片一
+   2) `div.card:nth-of-type(2)` — 卡片二
+   3) `div.card:nth-of-type(3)` — 卡片三
+   备注：这三个卡片样式不一致
+```
+
+## 截图标注
+
+截图会先打开编辑器，可以画**矩形 / 圈 / 箭头 / 文字**，选颜色、撤销，保存后才作为附件。
+存下来的就是带标注的 PNG，agent 直接看得到，不用再描述"左边那个框"。
+
 ## 采集：控制台 + 截图
 
 - **控制台 + 网络**：`inject-console.js` 在**主世界**（`world: MAIN`）包装 `console.log/info/warn/error`、`fetch`、`XMLHttpRequest`，

@@ -196,10 +196,19 @@ async function startPick() {
   hint('sendHint', '已进入拾取模式：回页面点一个元素，Esc 取消');
 }
 function renderPicked() {
-  if (!picked) { $('pickedBox').classList.add('hidden'); return; }
+  if (!picked.length) { $('pickedBox').classList.add('hidden'); $('pickedBox').innerHTML = ''; return; }
   $('pickedBox').classList.remove('hidden');
-  $('pickedSel').textContent = picked.selector;
-  $('pickedTxt').textContent = [picked.tag, picked.text?.slice(0, 80)].filter(Boolean).join(' · ');
+  $('pickedBox').innerHTML = picked.map((el, i) => `
+    <div class="pick-row">
+      <span class="num">${i + 1}</span>
+      <span class="pick-sel" title="${esc(el.selector)}">${esc(el.selector)}</span>
+      <span class="x" data-i="${i}">✕</span>
+    </div>`).join('');
+  $('pickedBox').querySelectorAll('.x').forEach((x) => x.addEventListener('click', (e) => {
+    e.stopPropagation();
+    picked.splice(Number(x.dataset.i), 1);
+    renderPicked();
+  }));
 }
 
 // ── 采集附件 ──
@@ -257,13 +266,128 @@ async function grabConsole(silent) {
   } catch (e) { if (!silent) hint('sendHint', '抓取失败：' + friendly(e), 'err'); }
 }
 
+
+// ── 截图标注编辑器 ────────────────────────────────────
+const ED = { img: null, shapes: [], tool: 'rect', drawing: null, scale: 1, result: null };
+
+function openEditor(dataUrl, onSave) {
+  ED.shapes = []; ED.tool = 'rect'; ED.onSave = onSave;
+  $('shotModal').classList.remove('hidden');
+  $('edText').classList.add('hidden');
+  $('edText').value = '';
+  document.querySelectorAll('.ed-tool').forEach((b) => b.classList.toggle('active', b.dataset.tool === 'rect'));
+  const img = new Image();
+  img.onload = () => {
+    ED.img = img;
+    const cv = $('edCanvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    redraw();
+  };
+  img.src = dataUrl;
+}
+
+function redraw(preview) {
+  const cv = $('edCanvas'), ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  if (ED.img) ctx.drawImage(ED.img, 0, 0);
+  const all = preview ? [...ED.shapes, preview] : ED.shapes;
+  for (const s of all) drawShape(ctx, s);
+}
+
+function drawShape(ctx, s) {
+  ctx.save();
+  ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+  ctx.lineWidth = Math.max(3, Math.round(ctx.canvas.width / 300));
+  if (s.type === 'rect') {
+    ctx.strokeRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
+  } else if (s.type === 'ellipse') {
+    const cx = (s.x1 + s.x2) / 2, cy = (s.y1 + s.y2) / 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, Math.abs(s.x2 - s.x1) / 2, Math.abs(s.y2 - s.y1) / 2, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (s.type === 'arrow') {
+    const ang = Math.atan2(s.y2 - s.y1, s.x2 - s.x1);
+    const head = Math.max(12, ctx.canvas.width / 60);
+    ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(s.x2, s.y2);
+    ctx.lineTo(s.x2 - head * Math.cos(ang - 0.4), s.y2 - head * Math.sin(ang - 0.4));
+    ctx.lineTo(s.x2 - head * Math.cos(ang + 0.4), s.y2 - head * Math.sin(ang + 0.4));
+    ctx.closePath(); ctx.fill();
+  } else if (s.type === 'text') {
+    const size = Math.max(16, Math.round(ctx.canvas.width / 45));
+    ctx.font = `600 ${size}px -apple-system, "PingFang SC", sans-serif`;
+    ctx.lineWidth = Math.max(3, size / 6);
+    ctx.strokeStyle = 'rgba(255,255,255,.9)';
+    ctx.strokeText(s.text, s.x1, s.y1);
+    ctx.fillStyle = s.color;
+    ctx.fillText(s.text, s.x1, s.y1);
+  }
+  ctx.restore();
+}
+
+function canvasPoint(e) {
+  const cv = $('edCanvas'), r = cv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * (cv.width / r.width), y: (e.clientY - r.top) * (cv.height / r.height) };
+}
+
+function bindEditor() {
+  document.querySelectorAll('.ed-tool').forEach((b) => b.addEventListener('click', () => {
+    ED.tool = b.dataset.tool;
+    document.querySelectorAll('.ed-tool').forEach((x) => x.classList.toggle('active', x === b));
+    $('edText').classList.toggle('hidden', ED.tool !== 'text');
+    if (ED.tool === 'text') $('edText').focus();
+  }));
+
+  const cv = $('edCanvas');
+  cv.addEventListener('pointerdown', (e) => {
+    const p = canvasPoint(e);
+    if (ED.tool === 'text') {
+      const t = $('edText').value.trim();
+      if (!t) { $('edText').focus(); return hint('sendHint', '先输入文字再点图上位置', 'err'); }
+      ED.shapes.push({ type: 'text', x1: p.x, y1: p.y, text: t, color: $('edColor').value });
+      redraw(); return;
+    }
+    ED.drawing = { type: ED.tool, x1: p.x, y1: p.y, x2: p.x, y2: p.y, color: $('edColor').value };
+    cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (!ED.drawing) return;
+    const p = canvasPoint(e);
+    ED.drawing.x2 = p.x; ED.drawing.y2 = p.y;
+    redraw(ED.drawing);
+  });
+  cv.addEventListener('pointerup', () => {
+    if (!ED.drawing) return;
+    const d = ED.drawing; ED.drawing = null;
+    if (Math.abs(d.x2 - d.x1) > 4 || Math.abs(d.y2 - d.y1) > 4) ED.shapes.push(d);
+    redraw();
+  });
+
+  $('btnEdUndo').addEventListener('click', () => { ED.shapes.pop(); redraw(); });
+  $('btnEdClose').addEventListener('click', () => $('shotModal').classList.add('hidden'));
+  $('btnEdCancel').addEventListener('click', () => $('shotModal').classList.add('hidden'));
+  $('btnEdSave').addEventListener('click', async () => {
+    $('btnEdSave').disabled = true;
+    try {
+      const dataUrl = $('edCanvas').toDataURL('image/png');
+      await ED.onSave(dataUrl);
+      $('shotModal').classList.add('hidden');
+    } catch (e) { hint('sendHint', '保存失败：' + friendly(e), 'err'); }
+    finally { $('btnEdSave').disabled = false; }
+  });
+}
+
 async function takeShot() {
   try {
     const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-    const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'screenshot', dataUrl }) });
-    captures.push({ kind: 'screenshot', id: d.id, path: d.path, url: d.url, dataUrl });
-    renderCaps();
-    hint('sendHint', '已截图，会随下一条标注一起发', 'ok');
+    openEditor(dataUrl, async (annotated) => {
+      const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'screenshot', dataUrl: annotated }) });
+      captures.push({ kind: 'screenshot', id: d.id, path: d.path, url: d.url, dataUrl: annotated });
+      renderCaps();
+      hint('sendHint', '已保存标注截图，会随下一条标注一起发', 'ok');
+    });
   } catch (e) { hint('sendHint', '截图失败：' + friendly(e), 'err'); }
 }
 
@@ -298,14 +422,18 @@ async function addToQueue() {
   if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
   const comment = $('comment').value.trim();
   if (!comment) return hint('sendHint', '先写一句备注', 'err');
-  if (!picked) return hint('sendHint', '先在页面上选一个元素', 'err');
+  if (!picked.length) return hint('sendHint', '先在页面上选元素', 'err');
   try {
     if ($('capConsole').checked) await grabConsole(true);
     await api('/queue', { method: 'POST', body: JSON.stringify({
-      tool, thread: selected.id, comment, selector: picked.selector,
-      text: picked.text, url: picked.url, severity: $('severity').value,
-      captures: captures.slice() }) });
+      tool, thread: selected.id, comment,
+      selector: picked[0].selector, text: picked[0].text, url: picked[0].url,
+      elements: picked.map((e) => ({ selector: e.selector, tag: e.tag, text: e.text })),
+      severity: $('severity').value, captures: captures.slice() }) });
     captures = []; renderCaps();
+    picked = []; renderPicked();
+    const tab = await activeTab();
+    if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'CLEAR_PICKS' }).catch(() => {});
     $('comment').value = ''; $('comment').focus();
     hint('sendHint', '已加入队列', 'ok');
     await loadQueue(); await refreshSummary();
@@ -515,6 +643,7 @@ function bind() {
   $('tabSessions').addEventListener('click', () => switchTab('sessions'));
   $('btnPick').addEventListener('click', startPick);
   $('btnShot').addEventListener('click', takeShot);
+  bindEditor();
   $('btnGrabLogs').addEventListener('click', () => grabConsole(false));
   $('btnClearCaps').addEventListener('click', () => { captures = []; renderCaps(); $('consoleCount').textContent = '0 条'; });
   $('capConsole').addEventListener('change', (e) => chrome.storage.local.set({ capConsole: e.target.checked }));
@@ -541,7 +670,12 @@ function bind() {
   $('newModal').addEventListener('click', (e) => { if (e.target.id === 'newModal') $('newModal').classList.add('hidden'); });
 
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg?.type === 'ELEMENT_PICKED') { picked = msg.payload; renderPicked(); hint('sendHint', '已选中元素，写备注吧', 'ok'); }
+    if (msg?.type === 'ELEMENT_PICKED') {
+      picked = msg.payload.items || [];
+      renderPicked();
+      hint('sendHint', picked.length ? `已选 ${picked.length} 个元素${picked.length > 1 ? '（可继续点，Enter 结束）' : ''}` : '已清空选择', 'ok');
+    }
+    if (msg?.type === 'PICK_FINISHED') hint('sendHint', `已选 ${msg.count} 个元素，写备注后回车入队`, 'ok');
     if (msg?.type === 'PICK_CANCELLED') hint('sendHint', '已取消拾取');
   });
 }
