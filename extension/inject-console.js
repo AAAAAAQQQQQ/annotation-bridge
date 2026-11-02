@@ -19,6 +19,53 @@
       return orig.apply(this, args);
     };
   }
+  // ── 网络：fetch / XHR ──
+  const postNet = (rec) => { try { window.postMessage({ __abNet: 1, rec }, '*'); } catch {} };
+
+  const origFetch = window.fetch;
+  if (origFetch) {
+    window.fetch = async function (...args) {
+      const input = args[0];
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const method = String((args[1] && args[1].method) || (input && input.method) || 'GET').toUpperCase();
+      const t0 = performance.now();
+      try {
+        const res = await origFetch.apply(this, args);
+        const ms = Math.round(performance.now() - t0);
+        let snippet = '';
+        if (!res.ok) {
+          try { snippet = (await res.clone().text()).slice(0, 300); } catch {}
+        }
+        postNet({ url: String(url).slice(0, 300), method, status: res.status, ok: res.ok, ms, snippet });
+        return res;
+      } catch (e) {
+        postNet({ url: String(url).slice(0, 300), method, status: 0, ok: false, ms: Math.round(performance.now() - t0), error: String((e && e.message) || e) });
+        throw e;
+      }
+    };
+  }
+
+  const XHR = window.XMLHttpRequest;
+  if (XHR && XHR.prototype) {
+    const origOpen = XHR.prototype.open;
+    const origSend = XHR.prototype.send;
+    XHR.prototype.open = function (m, u, ...rest) {
+      try { this.__abM = String(m || 'GET').toUpperCase(); this.__abU = String(u || ''); } catch {}
+      return origOpen.call(this, m, u, ...rest);
+    };
+    XHR.prototype.send = function (...args) {
+      const t0 = performance.now();
+      try {
+        this.addEventListener('loadend', () => {
+          let snippet = '';
+          try { if (this.status >= 400) snippet = String(this.responseText || '').slice(0, 300); } catch {}
+          postNet({ url: String(this.__abU || '').slice(0, 300), method: this.__abM || 'GET', status: this.status, ok: this.status >= 200 && this.status < 300, ms: Math.round(performance.now() - t0), snippet });
+        });
+      } catch {}
+      return origSend.apply(this, args);
+    };
+  }
+
   window.addEventListener('error', (e) => post('error', `${e.message} @ ${e.filename}:${e.lineno}`), true);
   window.addEventListener('unhandledrejection', (e) => post('error', `unhandled: ${e.reason?.message || e.reason}`));
 })();

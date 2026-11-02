@@ -5,6 +5,7 @@
 
   const MAX_LOGS = 200;
   const logs = [];
+  const net = [];
   const push = (level, text) => {
     logs.push({ level, text: String(text).slice(0, 600), ts: Date.now() });
     if (logs.length > MAX_LOGS) logs.shift();
@@ -12,8 +13,12 @@
 
   // 控制台：由主世界的 inject-console.js 通过 postMessage 送过来
   window.addEventListener('message', (e) => {
-    if (e.source !== window || !e.data || e.data.__abConsole !== 1) return;
-    push(e.data.level, e.data.text);
+    if (e.source !== window || !e.data) return;
+    if (e.data.__abConsole === 1) push(e.data.level, e.data.text);
+    if (e.data.__abNet === 1 && e.data.rec) {
+      net.push(e.data.rec);
+      while (net.length > 100) net.shift();
+    }
   });
 
   // 拾取
@@ -119,7 +124,7 @@
     if (msg?.type === 'START_PICK') { startPick(); reply({ ok: true }); }
     if (msg?.type === 'STOP_PICK') { stopPick(); reply({ ok: true }); }
     if (msg?.type === 'PING') reply({ ok: true });
-    if (msg?.type === 'GET_LOGS') reply({ ok: true, logs: logs.slice(-80), total: logs.length });
-    if (msg?.type === 'CLEAR_LOGS') { logs.length = 0; reply({ ok: true }); }
+    if (msg?.type === 'GET_LOGS') reply({ ok: true, logs: logs.slice(-80), total: logs.length, net: net.slice(-50) });
+    if (msg?.type === 'CLEAR_LOGS') { logs.length = 0; net.length = 0; reply({ ok: true }); }
   });
 })();

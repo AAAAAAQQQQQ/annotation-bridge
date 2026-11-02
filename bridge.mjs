@@ -414,7 +414,7 @@ function composeMessage(items) {
   const consoles = allCaps.filter((c) => c.kind === 'console');
   if (consoles.length) {
     const lines = consoles[0].preview || [];
-    out.push('## 页面控制台（最近的错误/警告）');
+    out.push('## 页面控制台 / 网络（最近的错误）');
     out.push(...lines.map((l) => `- ${l}`));
     out.push('');
   }
@@ -512,11 +512,16 @@ const server = http.createServer(async (req, res) => {
       }
       if (b.kind === 'console') {
         const logs = Array.isArray(b.logs) ? b.logs.slice(-80) : [];
+        const net = Array.isArray(b.net) ? b.net.slice(-50) : [];
         const file = path.join(CAP_DIR, `${id}.json`);
-        fs.writeFileSync(file, JSON.stringify(logs, null, 2));
-        const preview = logs.filter((l) => l.level === 'error' || l.level === 'warn')
-          .slice(-8).map((l) => `[${l.level}] ${String(l.text).slice(0, 160)}`);
-        return json(res, 200, { id, kind: 'console', path: file, url: `/capture/file?id=${id}`, count: logs.length, preview, ts });
+        fs.writeFileSync(file, JSON.stringify({ logs, net }, null, 2));
+        const preview = [
+          ...logs.filter((l) => l.level === 'error' || l.level === 'warn')
+            .slice(-6).map((l) => `[${l.level}] ${String(l.text).slice(0, 160)}`),
+          ...net.filter((n) => !n.ok)
+            .slice(-6).map((n) => `[网络 ${n.status || 'ERR'}] ${n.method} ${n.url}${n.ms ? ` (${n.ms}ms)` : ''}`),
+        ];
+        return json(res, 200, { id, kind: 'console', path: file, url: `/capture/file?id=${id}`, count: logs.length, netCount: net.length, preview, ts });
       }
       return json(res, 400, { error: 'unknown capture kind' });
     }

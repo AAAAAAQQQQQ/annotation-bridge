@@ -215,7 +215,7 @@ function renderCaps() {
         <span class="x" data-i="${i}">✕</span>
       </div>`;
     }
-    return `<span class="chip console-chip" data-i="${i}" title="点击查看全部日志">🖥 控制台 ${c.count} 条<span class="x" data-i="${i}">✕</span></span>`;
+    return `<span class="chip console-chip" data-i="${i}" title="点击查看全部日志">🖥 日志 ${c.count}${c.netCount ? ` · 网络 ${c.netCount}` : ''}<span class="x" data-i="${i}">✕</span></span>`;
   }).join('');
 
   box.querySelectorAll('.x').forEach((el) => el.addEventListener('click', (e) => {
@@ -245,13 +245,14 @@ async function grabConsole(silent) {
   }
   try {
     const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'GET_LOGS' });
-    $('consoleCount').textContent = `${r?.total ?? 0} 条`;
+    const netFail = (r?.net || []).filter((n) => !n.ok).length;
+    $('consoleCount').textContent = `${r?.total ?? 0} 条${netFail ? ` · 网络失败 ${netFail}` : ''}`;
     if (!silent) {
       if (!r?.total) return hint('sendHint', '这个页面还没有捕获到日志', '');
-      const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'console', logs: r.logs }) });
-      captures.push({ kind: 'console', id: d.id, count: d.count, path: d.path, url: d.url, preview: d.preview });
+      const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'console', logs: r.logs, net: r.net }) });
+      captures.push({ kind: 'console', id: d.id, count: d.count, netCount: d.netCount || 0, path: d.path, url: d.url, preview: d.preview });
       renderCaps();
-      hint('sendHint', `已附上 ${d.count} 条控制台日志`, 'ok');
+      hint('sendHint', `已附上 ${d.count} 条日志 · ${d.netCount || 0} 个请求`, 'ok');
     }
   } catch (e) { if (!silent) hint('sendHint', '抓取失败：' + friendly(e), 'err'); }
 }
