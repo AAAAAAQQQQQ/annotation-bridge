@@ -14,6 +14,12 @@ const execFileP = promisify(execFile);
 const PORT = Number(process.env.BRIDGE_PORT || 47391);
 const DRY_RUN = process.env.DRY_RUN === '1';
 const HOME = os.homedir();
+const VERSION = '0.2.0';
+
+// Chrome / Finder 拉起的进程 PATH 往往只有 /usr/bin:/bin，补上常见安装位置，
+// 否则 codex / node / zstd 全都“找不到”，面板里工具会变灰。
+const EXTRA_PATH = ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+process.env.PATH = [...new Set([...(process.env.PATH || '').split(':').filter(Boolean), ...EXTRA_PATH])].join(':');
 
 const BIN = {
   codex: process.env.CODEX_BIN || 'codex',
@@ -435,6 +441,13 @@ function composeMessage(items) {
   return out.join('\n');
 }
 
+// ── 扩展控制通道 ──────────────────────────────────────
+// 桌面 app 点「打开面板」时往这里排一条命令；原生宿主每秒来取一次，
+// 取到后用 stdout 推给扩展 service worker，由它开一个独立窗口。
+let hostSeenAt = 0;          // 最近一次宿主来取命令的时间（≈ 扩展在线）
+let commands = [];
+const hostsOnline = () => Date.now() - hostSeenAt < 5000;
+
 // ── HTTP ──────────────────────────────────────────────
 const json = (res, code, obj) => {
   res.writeHead(code, {
@@ -456,7 +469,29 @@ const server = http.createServer(async (req, res) => {
   const p = u.pathname;
   if (req.method === 'OPTIONS') return json(res, 204, {});
   try {
-    if (p === '/health') return json(res, 200, { ok: true, port: PORT, dryRun: DRY_RUN });
+    if (p === '/health') return json(res, 200, { ok: true, port: PORT, dryRun: DRY_RUN, pid: process.pid, uptime: Math.round(process.uptime()), version: VERSION, extension: hostsOnline() });
+
+    // 宿主每秒来取一次命令；同时充当「扩展在线」心跳
+    if (p === '/command' && req.method === 'GET') {
+      hostSeenAt = Date.now();
+      const now = Date.now();
+      commands = commands.filter((c) => now - c.at < 30000);   // 过期命令不补发，免得一开面板就弹一堆
+      return json(res, 200, { command: commands.shift() || null });
+    }
+
+    // 桌面 app / 脚本：让 Chrome 里的扩展弹一个独立面板窗口
+    if (p === '/open-panel' && req.method === 'POST') {
+      commands.push({ type: 'OPEN_PANEL', at: Date.now() });
+      if (commands.length > 8) commands = commands.slice(-8);
+      return json(res, 200, { ok: true, extension: hostsOnline() });
+    }
+
+    // 供桌面 app / 脚本干净地停掉服务（仅本机可访问）
+    if (p === '/shutdown' && req.method === 'POST') {
+      json(res, 200, { ok: true, stopping: true, pid: process.pid });
+      setTimeout(() => process.exit(0), 120);
+      return;
+    }
     if (p === '/tools') return json(res, 200, { tools: toolsInfo(), dryRun: DRY_RUN });
 
     if (p === '/sessions') {

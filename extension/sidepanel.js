@@ -1,9 +1,16 @@
+// 由桌面 app / 原生宿主唤起时用独立窗口打开（?standalone=1）
+if (new URLSearchParams(location.search).has('standalone')) document.body.classList.add('standalone');
+
 const $ = (id) => document.getElementById(id);
 const K_TOOL = 'toolV3', K_THREAD = 'threadV3', K_CWD = 'cwdV3';
 
 let bridge = 'http://127.0.0.1:47391';
+let bridgeCandidates = [];   // 探测成功后缓存可用地址
+let lastError = '';          // 最近一次连接错误，离线横幅用
+let qSummary = {};           // 每个会话的待发条数，会话列表角标用
+let lastSend = null;         // 最近一次发送的参数，回复轮询用
 let captures = [];   // 待随下一条标注一起发送的截图/控制台
-let tools = [], tool = 'codex', sessions = [], selected = null, picked = null, pollTimer = null;
+let tools = [], tool = 'codex', sessions = [], selected = null, picked = [], pollTimer = null;
 
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const meta = () => tools.find((t) => t.id === tool) || {};
@@ -87,7 +94,7 @@ async function api(path, opts = {}) {
   try {
     const r = await nativeCall(path, method, body);
     if (r) {
-      if (r.status >= 400) throw new ApiError(r.data?.error || `HTTP ${r.status}`, r.status === 502 ? 'UPSTREAM' : 'HTTP');
+      if (r.status === 0 || r.status >= 400) throw new ApiError(r.data?.error || `HTTP ${r.status}`, r.status === 502 ? 'UPSTREAM' : 'HTTP');
       setOffline(false);
       return r.data;
     }
@@ -244,7 +251,7 @@ async function startPick() {
   hint('sendHint', '已进入拾取模式：回页面点一个元素，Esc 取消');
 }
 function renderPicked() {
-  if (!picked.length) { $('pickedBox').classList.add('hidden'); $('pickedBox').innerHTML = ''; return; }
+  if (!picked || !picked.length) { $('pickedBox').classList.add('hidden'); $('pickedBox').innerHTML = ''; return; }
   $('pickedBox').classList.remove('hidden');
   $('pickedBox').innerHTML = picked.map((el, i) => `
     <div class="pick-row">

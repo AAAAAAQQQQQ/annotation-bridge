@@ -9,9 +9,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.BRIDGE_PORT || 47391);
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NODE = process.env.NODE_BIN || process.execPath;
 const LOG = path.join(os.homedir(), 'Library', 'Logs', 'annotation-bridge-native.log');
 
@@ -40,13 +41,20 @@ async function ensureBridge() {
     starting = (async () => {
       log('bridge 未运行，尝试拉起');
       const out = fs.openSync(LOG, 'a');
+      // Chrome 从 Dock 启动时 PATH 很干净，补上常见安装位置，
+      // 不然 bridge 里 codex / zstd 会找不到。
+      const env = {
+        ...process.env,
+        PATH: [...new Set([...(process.env.PATH || '').split(':').filter(Boolean),
+          '/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':'),
+      };
       const child = spawn(NODE, [path.join(ROOT, 'bridge.mjs')], {
-        cwd: ROOT, detached: true, stdio: ['ignore', out, out],
+        cwd: ROOT, detached: true, stdio: ['ignore', out, out], env,
       });
       child.unref();
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 250));
-        if (await healthy()) { log('bridge 已启动 pid=' + child.pid); return true; }
+        if (await healthy()) { log(`bridge 已启动 pid=${child.pid} port=${PORT}`); return true; }
       }
       log('bridge 启动失败');
       return false;
@@ -58,6 +66,7 @@ async function ensureBridge() {
 }
 
 async function forward({ method = 'GET', path: p, body }) {
+  const t0 = Date.now();
   const ok = await ensureBridge();
   if (!ok) throw new Error('本地服务启动失败，请看 ~/Library/Logs/annotation-bridge-native.log');
   const res = await fetch(`http://127.0.0.1:${PORT}${p}`, {
@@ -68,8 +77,11 @@ async function forward({ method = 'GET', path: p, body }) {
   });
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  log(`${method} ${p} → ${res.status} (${Date.now() - t0}ms)`);
   return { status: res.status, data };
 }
+
+log(`host 启动 pid=${process.pid} node=${NODE}`);
 
 // ── stdio 协议 ──
 let buf = Buffer.alloc(0);
@@ -94,3 +106,24 @@ process.stdin.on('data', (chunk) => {
 });
 process.stdin.on('end', () => process.exit(0));
 process.on('uncaughtException', (e) => log('uncaught: ' + e.message));
+
+// ── 命令通道 ──
+// 桌面 app 点「打开面板」→ bridge 排队 OPEN_PANEL → 这里取到后推给扩展。
+// 注意：这里不 ensureBridge，避免用户刚点「停止服务」又立刻被拉起来。
+let polling = false;
+async function pollCommands() {
+  if (polling) return;
+  polling = true;
+  try {
+    const r = await fetch(`http://127.0.0.1:${PORT}/command`, { signal: AbortSignal.timeout(2500) });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.command) {
+        log(`推送命令 ${d.command.type}`);
+        send({ type: 'COMMAND', command: d.command.type });
+      }
+    }
+  } catch { /* bridge 没起就安静跳过 */ }
+  finally { polling = false; }
+}
+setInterval(pollCommands, 1000).unref();

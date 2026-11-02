@@ -2,7 +2,7 @@
 
 <h1>annotation-bridge</h1>
 
-<sub>在网页上标注元素、写下意见，一次性投递到 <b>Codex / Claude / DeepSeek Harness</b> 的会话，并显示回复和调用链。</sub>
+<sub>在网页上标注元素、写下意见，一次性投递到 <b>Codex / Claude / DeepSeek Harness</b> 的会话，并显示回复和调用链。<br/>配一个菜单栏 App，点一下弹出标注面板。</sub>
 
 <br/><br/>
 
@@ -138,9 +138,23 @@ Chrome 从 **142** 起默认启用 **Local Network Access**：从公共来源访
 
 打开 `chrome://flags/#local-network-access-check` → 设为 **Disabled** → 重启浏览器。
 
-### 3. 用
+### 3. 装桌面 app（可选但推荐）
 
-点工具栏图标 → 侧边栏从右侧弹出。
+```bash
+./app/build.sh
+```
+
+之后从 `~/Applications/标注投递.app`（或聚焦搜索）启动：菜单栏多一个图标，
+点「打开标注面板」就会弹出一个独立的面板窗口，不用去翻 Chrome 工具栏。
+
+### 4. 用
+
+两种打开方式：
+
+- 点 Chrome 工具栏的扩展图标 → 侧边栏弹出
+- 点菜单栏的 **标注投递** → **打开标注面板** → 独立窗口弹出
+
+> 装完原生宿主或改了 `background.js`，记得重启 Chrome / 在 `chrome://extensions` 点一次刷新。
 
 ---
 
@@ -178,7 +192,10 @@ bridge 就监听在 `127.0.0.1:47391`，不连外网。你可以直接拿它当 
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/health` | 存活 + 当前 codex 路径 |
+| GET | `/health` | 存活 + pid/版本/扩展是否连上 |
+| POST | `/open-panel` | 让 Chrome 里的扩展弹出面板窗口 |
+| GET | `/command` | 原生宿主每秒来取命令（同时是扩展在线心跳） |
+| POST | `/shutdown` | 停掉服务（桌面 app 用它） |
 | GET | `/sessions?limit=60` | 会话列表（5 秒缓存） |
 | GET | `/messages?thread=&limit=` | 某会话最近消息 |
 | POST | `/queue` | 入队 `{thread, comment, selector, text, url, severity}` |
@@ -228,6 +245,15 @@ node test/serve.mjs &
 node test/probe.mjs
 ```
 
+**原生通道**（不需要端口转发、不需要关 LNA）单独测：
+
+```bash
+node test/native-probe.mjs       # 宿主拉起 bridge + 面板走原生通道
+node test/open-panel-probe.mjs   # 桌面 app 的「打开面板」整条链路
+```
+
+两个脚本都会自己起一个隔离端口的 bridge + 全新 Chrome profile，不会碰你正在用的服务。
+
 > `DRY_RUN=1` 不能省——否则真的会往你选中的那个会话里投消息。
 
 ---
@@ -237,12 +263,37 @@ node test/probe.mjs
 1. **Claude 只有只读那一半。** 这台机器上没装 `claude` CLI，所以 Claude 页签是灰的，只能读历史不能发。装好 CLI 后适配器已经就位（`claude --resume <id> -p --model <m>`）。
 2. **「排队」不等于「立即执行」。** 消息进的是该会话的队列，能不能立刻跑取决于 Codex 的 app-server 状态。
 3. **换模型的代价。** Codex 换模型必须走 `codex exec resume`，这会在新进程里跑一轮完整对话——耗时和 token 都按一整轮算，不是"改个设置"。
-3. **同一个会话别开两个进程**，消息归属会乱。
-4. **回复轮询上限 3 分钟**，超时手动点「读最近」。
-5. **正在跑、还没落盘的当前轮**可能不在会话列表里。
-6. 侧边栏 UI 只在本地手工加载验证过，没有跑自动化测试。
+4. **同一个会话别开两个进程**，消息归属会乱。
+5. **回复轮询上限 3 分钟**，超时手动点「读最近」。
+6. **正在跑、还没落盘的当前轮**可能不在会话列表里。
+7. 桌面 app 的菜单点击没法自动化（只能测到 CLI 和唤起链路），面板 UI 有 `test/probe.mjs` 和 `test/open-panel-probe.mjs` 两个自动测试兜着。
 
 ---
+
+
+## 排障
+
+**`Specified native messaging host not found`**
+宿主清单的位置跟 **user-data-dir** 走，不总是家目录：
+
+- 默认 profile：`~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.gjr.annotation_bridge.json`
+- 自定义 `--user-data-dir=/x`：清单必须放 `/x/NativeMessagingHosts/`
+- Chrome for Testing 默认：`~/Library/Application Support/Google/Chrome for Testing/NativeMessagingHosts/`
+
+`./install-native.sh` 会写前面三个默认位置。装完**重启 Chrome** 才会重新读清单。
+
+**工具全灰 / DSH 会话没有名字**
+Chrome 从 Dock 启动时 `PATH` 只有 `/usr/bin:/bin`，`codex`、`zstd` 都找不到。
+bridge 启动时会自己补 `/opt/homebrew/bin` 等常见路径（`bridge.mjs` 顶部的 `EXTRA_PATH`），宿主拉 bridge 时也会补一次。
+如果还是灰的，重启一次服务（桌面 app → 重启服务）即可。
+
+**改了扩展代码没生效**
+`background.js` 改动需要到 `chrome://extensions` 点一下刷新，或者重启 Chrome；
+只改 `sidepanel.js` / CSS 的话，重开面板窗口就行。
+
+**`pkill -f "node bridge.mjs"` 杀不掉**
+实际命令行是 `node /Users/xxx/Project/annotation-bridge/bridge.mjs`，中间隔着绝对路径。
+用 `pkill -f annotation-bridge/bridge.mjs`，或者直接点桌面 app 的「停止服务」（走 `POST /shutdown`）。
 
 ## License
 
@@ -296,14 +347,44 @@ launchctl bootout gui/$(id -u)/com.gjr.annotation-bridge
 **图片怎么送到模型**：走「续跑」模式时，bridge 会把这些 PNG 用 `codex exec resume ... -i <png>` 传过去，
 模型是**真的看到图**，不是读路径。排队模式没有图片通道，只会带上文件路径——面板会提示这一点。
 
-## 桌面应用（不用开终端）
+## 桌面应用：标注投递.app
 
-`~/Applications/` 下有两个 app，双击即用：
+```bash
+cd ~/Project/annotation-bridge && ./app/build.sh
+```
 
-- **标注投递.app** —— 检查服务是否在跑，没跑就后台拉起，然后弹通知
-- **停止标注投递.app** —— 停掉服务
+装到 `~/Applications/标注投递.app`。不需要 Xcode，用系统里已有的 Python + PyObjC。
 
-服务用 `nohup` 脱离终端，关掉终端窗口不影响。日志在 `~/Library/Logs/annotation-bridge.log`。
+菜单栏图标点开：
+
+- 顶部是状态：**绿点** = 服务在跑且扩展已连上，**橙点** = 服务在跑但扩展没连，**灰点** = 服务停了
+- **打开标注面板** —— 让 Chrome 里的扩展弹出一个独立的 440×940 面板窗口（不是标签页）
+- 启动 / 停止 / 重启服务，复制服务地址
+- 打开日志、打开项目目录、重新安装原生宿主
+- 登录时自动启动（写一个 LaunchAgent）
+
+**它怎么唤起面板**：app → `POST /open-panel` → bridge 排队一条命令 → 原生宿主每秒取一次 → 推给扩展 service worker → `chrome.windows.create` 弹窗。
+Chrome 不允许从外部直接打开 `chrome-extension://` 页面（`open`、`--app`、AppleScript 都会被挡），所以走这条原生消息回推的链路。
+
+命令行同样可用（脚本/自动化友好）：
+
+```bash
+APP="$HOME/Applications/标注投递.app/Contents/MacOS/AnnotationBridge"
+"$APP" --status        # {"ok":true,"extension":true,"pid":...,"version":"0.2.0"}
+"$APP" --start         # 起服务（已在跑就什么都不做）
+"$APP" --stop          # 停服务
+"$APP" --restart
+"$APP" --open-panel    # 弹面板窗口
+"$APP" --selftest      # 只检查 AppKit 链路，不开窗口
+```
+
+配置可选，换端口/换项目就能复用这个壳：`~/Library/Application Support/AnnotationBridge/config.json`
+
+```json
+{"name":"标注投递","port":47391,"projectDir":"~/Project/annotation-bridge","entry":"bridge.mjs"}
+```
+
+服务日志：`~/Library/Logs/annotation-bridge.log`；app 自身日志：`~/Library/Logs/annotation-bridge-app.log`。
 
 ## 采集：控制台 + 截图
 

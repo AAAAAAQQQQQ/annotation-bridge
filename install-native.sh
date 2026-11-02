@@ -36,3 +36,8 @@ write_manifest "$HOME/Library/Application Support/Google/Chrome/NativeMessagingH
 write_manifest "$HOME/Library/Application Support/Google/Chrome for Testing/NativeMessagingHosts"
 write_manifest "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
 echo "完成。重启 Chrome 后，扩展会直接拉起本地宿主，不再需要端口和 start.sh。"
+echo
+echo "注意：Chrome 的用户级宿主目录跟着 user-data-dir 走。"
+echo "      如果你用 --user-data-dir=/x 启动，清单要放到 /x/NativeMessagingHosts/。"
+echo "      验证：tail -f ~/Library/Logs/annotation-bridge-native.log，"
+echo "      看到 'host 启动' 就是走通了原生通道。"

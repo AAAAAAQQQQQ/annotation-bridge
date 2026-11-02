@@ -33,6 +33,10 @@ body{margin:0;background:var(--bg);color:var(--ink);display:flex;flex-direction:
 .tab.active::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent);border-radius:2px 2px 0 0}
 
 main{flex:1;overflow-y:auto;padding:12px 14px 8px}
+
+/* 独立窗口模式：窗口本身 440 宽；万一被当成普通标签页打开，也别拉成整屏 */
+body.standalone{max-width:520px;margin:0 auto;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+body.standalone .bar{-webkit-app-region:drag}
 .pane{display:flex;flex-direction:column;gap:10px}
 
 /* 拾取 */
