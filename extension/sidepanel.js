@@ -12,6 +12,7 @@ let lastSend = null;         // 最近一次发送的参数，回复轮询用
 let captures = [];   // 待随下一条标注一起发送的截图/控制台
 let tools = [], tool = 'codex', sessions = [], selected = null, picked = [], pollTimer = null;
 let pickingActive = false;   // 面板这边记一下拾取状态，Esc 才能随时退出
+let pickTabId = null;        // 拾取发生在哪个标签页；切标签后别把消息发错地方
 
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const meta = () => tools.find((t) => t.id === tool) || {};
@@ -256,6 +257,13 @@ async function ensureContent(tabId) {
     } catch { return false; }
   }
 }
+/** 拾取/删除/定位都发回「当初拾取的那个标签页」，不是当前 active 的 */
+async function pageTabId() {
+  if (pickTabId) return pickTabId;
+  const tab = await activeTab();
+  return tab?.tabId || null;
+}
+
 function setPicking(on) {
   pickingActive = !!on;
   const fab = $('fabPick');
@@ -268,6 +276,7 @@ async function startPick() {
   const tab = await activeTab();
   if (!tab?.tabId) return hint('sendHint', '没有可用的标签页', 'err');
   if (!(await ensureContent(tab.tabId))) return hint('sendHint', '这个页面不允许注入脚本', 'err');
+  pickTabId = tab.tabId;
   await chrome.tabs.sendMessage(tab.tabId, { type: 'START_PICK' });
   setPicking(true);
   hint('sendHint', '拾取中：在页面上点元素 · 按 Esc 退出', 'ok');
@@ -275,8 +284,8 @@ async function startPick() {
 
 /** 面板有焦点时也能退出拾取（页面那边收不到键盘事件） */
 async function stopPickRemote() {
-  const tab = await activeTab();
-  if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'STOP_PICK' }).catch(() => {});
+  const tabId = await pageTabId();
+  if (tabId) chrome.tabs.sendMessage(tabId, { type: 'STOP_PICK' }).catch(() => {});
   setPicking(false);
   hint('sendHint', '已退出拾取', '');
 }
@@ -322,12 +331,12 @@ function renderPicked() {
     row.addEventListener('mouseenter', async () => {
       const el = picked[Number(row.dataset.i)];
       if (!el) return;
-      const tab = await activeTab();
-      if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'HIGHLIGHT', selector: el.selector }).catch(() => {});
+      const tabId = await pageTabId();
+      if (tabId) chrome.tabs.sendMessage(tabId, { type: 'HIGHLIGHT', selector: el.selector }).catch(() => {});
     });
     row.addEventListener('mouseleave', async () => {
-      const tab = await activeTab();
-      if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'UNHIGHLIGHT' }).catch(() => {});
+      const tabId = await pageTabId();
+      if (tabId) chrome.tabs.sendMessage(tabId, { type: 'UNHIGHLIGHT' }).catch(() => {});
     });
   });
   $('btnClearPicked')?.addEventListener('click', (e) => { e.stopPropagation(); clearPicked(); });
@@ -339,10 +348,10 @@ async function removePick(i) {
   if (!el) return;
   picked.splice(i, 1);
   renderPicked();
-  const tab = await activeTab();
-  if (!tab?.tabId) return;
+  const tabId = await pageTabId();
+  if (!tabId) return;
   try {
-    const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'REMOVE_PICK', selector: el.selector });
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'REMOVE_PICK', selector: el.selector });
     if (Array.isArray(r?.items)) { picked = r.items; renderPicked(); }
   } catch { /* 页面没注入脚本就只改面板这边 */ }
 }
@@ -350,18 +359,18 @@ async function removePick(i) {
 async function clearPicked() {
   picked = [];
   renderPicked();
-  const tab = await activeTab();
-  if (tab?.tabId) chrome.tabs.sendMessage(tab.tabId, { type: 'CLEAR_PICKS' }).catch(() => {});
+  const tabId = await pageTabId();
+  if (tabId) chrome.tabs.sendMessage(tabId, { type: 'CLEAR_PICKS' }).catch(() => {});
 }
 
 /** 改成选上一层：点到了文字/图标、想选整张卡片时用 */
 async function promotePick(i) {
   const el = picked[i];
   if (!el) return;
-  const tab = await activeTab();
-  if (!tab?.tabId) return;
+  const tabId = await pageTabId();
+  if (!tabId) return;
   try {
-    const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'PROMOTE', selector: el.selector });
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'PROMOTE', selector: el.selector });
     if (r?.ok && Array.isArray(r.items)) {
       picked = r.items;
       renderPicked();
@@ -376,10 +385,10 @@ async function promotePick(i) {
 async function locatePick(i) {
   const el = picked[i];
   if (!el) return;
-  const tab = await activeTab();
-  if (!tab?.tabId) return;
+  const tabId = await pageTabId();
+  if (!tabId) return;
   try {
-    await chrome.tabs.sendMessage(tab.tabId, { type: 'FLASH', selector: el.selector });
+    await chrome.tabs.sendMessage(tabId, { type: 'FLASH', selector: el.selector });
     hint('sendHint', '已在页面上标出这个元素（黄框）', 'ok');
   } catch {
     hint('sendHint', '页面还没注入脚本 · 刷新一下页面', 'err');
@@ -993,6 +1002,23 @@ async function init() {
   await loadSessions();
   await refreshSummary();
   await loadQueue();
+  await restorePicks();
+}
+
+/** 面板关掉再打开：页面那边如果还留着已选元素，恢复清单 */
+async function restorePicks() {
+  try {
+    const tab = await activeTab();
+    if (!tab?.tabId) return;
+    const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'GET_PICKS' });
+    if (r?.items?.length) {
+      picked = r.items;
+      pickTabId = tab.tabId;
+      renderPicked();
+      setPicking(!!r.picking);
+      hint('sendHint', `已恢复 ${picked.length} 个已选元素`, 'ok');
+    }
+  } catch { /* 页面没注入脚本就算了 */ }
 }
 
 init();

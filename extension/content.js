@@ -205,14 +205,22 @@
     });
   }
 
-  let prevCursor = '', prevSelect = '';
+  // 页面里很多元素自己写了 cursor，行内样式压不住，用一段临时样式强制十字 + 禁选字
+  let pickStyle = null;
+  function enablePickStyle() {
+    if (pickStyle) return;
+    pickStyle = document.createElement('style');
+    pickStyle.textContent = '*,*::before,*::after{cursor:crosshair!important;' +
+      '-webkit-user-select:none!important;user-select:none!important}';
+    document.documentElement.appendChild(pickStyle);
+  }
+  function disablePickStyle() {
+    if (pickStyle) { pickStyle.remove(); pickStyle = null; }
+  }
+
   function startPick() {
-    // 重复进入拾取（比如两个面板）时不要用 crosshair 覆盖掉原来的光标
-    if (!picking) {
-      prevCursor = document.documentElement.style.cursor;
-      prevSelect = document.documentElement.style.userSelect;
-    }
     picking = true; mount();
+    enablePickStyle();
     banner.style.display = 'block';
     updateBanner();
     drawMarks();            // 上次选过的元素，重新进拾取模式也画出来
@@ -229,8 +237,7 @@
   function stopPick() {
     picking = false; hoverEl = null;
     clearMarks(); clearHighlight();
-    document.documentElement.style.cursor = prevCursor;
-    document.documentElement.style.userSelect = prevSelect;
+    disablePickStyle();
     document.removeEventListener('mousemove', onMove, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('keydown', onKey, true);
@@ -263,7 +270,7 @@
     if (msg?.type === 'STOP_PICK') { stopPick(); reply({ ok: true }); }
     if (msg?.type === 'PING') reply({ ok: true });
     if (msg?.type === 'GET_LOGS') reply({ ok: true, logs: logs.slice(-80), total: logs.length, net: net.slice(-50) });
-    if (msg?.type === 'GET_PICKS') reply({ ok: true, items: picked });
+    if (msg?.type === 'GET_PICKS') reply({ ok: true, items: picked, picking });
     if (msg?.type === 'REMOVE_PICK') {
       picked = picked.filter((x) => x.selector !== msg.selector);
       drawMarks();
