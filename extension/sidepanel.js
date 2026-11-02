@@ -212,7 +212,10 @@ function renderCaps() {
 async function grabConsole(silent) {
   const tab = await activeTab();
   if (!tab?.tabId) return;
-  if (!(await ensureContent(tab.tabId))) return;
+  if (!(await ensureContent(tab.tabId))) {
+    if (!silent) hint('sendHint', '这个页面不允许注入脚本（chrome:// 或扩展页）', 'err');
+    return;
+  }
   try {
     const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'GET_LOGS' });
     $('consoleCount').textContent = `${r?.total ?? 0} 条`;

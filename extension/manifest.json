@@ -35,6 +35,18 @@
         "https://*/*"
       ],
       "js": [
+        "inject-console.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
         "content.js"
       ],
       "run_at": "document_idle",

@@ -10,21 +10,11 @@
     if (logs.length > MAX_LOGS) logs.shift();
   };
 
-  // 控制台钩子（只包一层，保留原行为）
-  for (const level of ['log', 'info', 'warn', 'error']) {
-    const orig = console[level];
-    console[level] = function (...args) {
-      try {
-        push(level === 'log' ? 'info' : level, args.map((a) => {
-          if (typeof a === 'string') return a;
-          try { return JSON.stringify(a); } catch { return String(a); }
-        }).join(' '));
-      } catch {}
-      return orig.apply(this, args);
-    };
-  }
-  window.addEventListener('error', (e) => push('error', `${e.message} @ ${e.filename}:${e.lineno}`));
-  window.addEventListener('unhandledrejection', (e) => push('error', `unhandled: ${e.reason?.message || e.reason}`));
+  // 控制台：由主世界的 inject-console.js 通过 postMessage 送过来
+  window.addEventListener('message', (e) => {
+    if (e.source !== window || !e.data || e.data.__abConsole !== 1) return;
+    push(e.data.level, e.data.text);
+  });
 
   // 拾取
   let picking = false;

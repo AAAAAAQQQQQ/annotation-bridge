@@ -259,6 +259,6 @@ launchctl bootout gui/$(id -u)/com.gjr.annotation-bridge
 
 ## 采集：控制台 + 截图
 
-- **控制台**：`content.js` 包装了 `console.log/info/warn/error`，并监听 `window.onerror` 与 `unhandledrejection`，保留最近 200 条。面板里点「抓取」会把日志存到 `~/.annotation-bridge/captures/<id>.json`，随标注一起投递（消息里带错误/warn 摘要）。
+- **控制台**：`inject-console.js` 在**主世界**（`world: MAIN`）包装 `console.log/info/warn/error`，通过 `postMessage` 转给隔离世界的内容脚本，并监听 `window.onerror` 与 `unhandledrejection`，保留最近 200 条。面板里点「抓取」会把日志存到 `~/.annotation-bridge/captures/<id>.json`，随标注一起投递（消息里带错误/warn 摘要）。
 - **截图**：`chrome.tabs.captureVisibleTab` 抓当前可见区域，存成 PNG，路径写进投递消息。
 - 两条都会作为「附件」挂在标注上，入队后清空。
