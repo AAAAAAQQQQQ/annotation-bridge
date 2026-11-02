@@ -79,16 +79,34 @@
     };
   }
 
+  function hideHover() {
+    hoverEl = null;
+    box.style.display = 'none';
+    tip.style.display = 'none';
+  }
+
   const onMove = (e) => {
     if (!picking) return;
     const el = document.elementFromPoint(e.clientX, e.clientY);
     if (!el || el === hoverEl || el === box || el === tip) return;
     hoverEl = el;
     const r = el.getBoundingClientRect();
-    Object.assign(box.style, { display: 'block', left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
     const sel = cssPath(el);
+    const already = picked.some((x) => x.selector === sel);
+    if (already) {
+      // 已经选中的元素不再画预览框，否则看起来像选了两个
+      box.style.display = 'none';
+      tip.textContent = '已选 · 点击取消';
+      tip.style.background = '#b45309';
+    } else {
+      Object.assign(box.style, {
+        display: 'block', left: r.left + 'px', top: r.top + 'px',
+        width: r.width + 'px', height: r.height + 'px',
+      });
+      tip.textContent = '预览 · ' + (sel.length > 84 ? sel.slice(0, 82) + '…' : sel);
+      tip.style.background = '#1f6feb';
+    }
     tip.style.display = 'block';
-    tip.textContent = sel.length > 90 ? sel.slice(0, 88) + '…' : sel;
     tip.style.left = Math.max(8, r.left) + 'px';
     tip.style.top = Math.max(8, r.top - 26) + 'px';
   };
@@ -143,12 +161,20 @@
     if (!picking) return;
     e.preventDefault(); e.stopPropagation();
     const el = e.target;
+    // 点到页面空白（html/body）会框住整页，看起来像“全选了”，直接忽略
+    if (el === document.documentElement || el === document.body) {
+      banner.textContent = '点到页面空白了 · 请点具体的卡片 / 按钮 / 文字';
+      setTimeout(updateBanner, 2200);
+      hideHover();
+      return;
+    }
     const info = describe(el);
     // 同一个元素重复点 = 取消
     const idx = picked.findIndex((x) => x.selector === info.selector);
     if (idx >= 0) { picked.splice(idx, 1); }
     else { picked.push(info); }
     drawMarks();
+    hideHover();
     chrome.runtime.sendMessage({ type: 'ELEMENT_PICKED', payload: { multi: true, items: picked } }).catch(() => {});
   };
   const onKey = (e) => {
@@ -158,6 +184,8 @@
     }
   };
 
+  const onLeave = (e) => { if (e && e.relatedTarget) return; hideHover(); };
+
   function startPick() {
     picking = true; mount();
     banner.style.display = 'block';
@@ -166,6 +194,9 @@
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('click', onClick, true);
     document.addEventListener('keydown', onKey, true);
+    window.addEventListener('mouseout', onLeave, true);
+    window.addEventListener('scroll', hideHover, true);
+    window.addEventListener('blur', hideHover);
   }
   function stopPick() {
     picking = false; hoverEl = null;
@@ -173,6 +204,9 @@
     document.removeEventListener('mousemove', onMove, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('mouseout', onLeave, true);
+    window.removeEventListener('scroll', hideHover, true);
+    window.removeEventListener('blur', hideHover);
     banner.style.display = 'none'; box.style.display = 'none'; tip.style.display = 'none';
     unmount();
   }

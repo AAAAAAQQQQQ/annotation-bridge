@@ -133,6 +133,17 @@ for (const y of [232, 330]) {
 }
 await sleep(600);
 
+// 悬停在已选元素上：只应该有实线编号框，不该再冒出预览框
+await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 200, y: 232 }, tSid);
+await sleep(500);
+const overlays = await ev(tSid, `JSON.stringify([...document.querySelectorAll('div')].filter(d => d.style && d.style.position === 'fixed' && d.style.zIndex === '2147483647').map(d => ({
+  text: (d.textContent || '').slice(0, 24),
+  display: getComputedStyle(d).display,
+  borderStyle: getComputedStyle(d).borderTopStyle,
+  borderColor: getComputedStyle(d).borderTopColor,
+})))`);
+console.log('悬停已选元素时的覆盖层:', overlays);
+
 const listState = await ev(pSid, `JSON.stringify({
   hint: document.getElementById('sendHint')?.textContent || '',
   visible: !document.getElementById('pickedBox')?.classList.contains('hidden'),
@@ -153,15 +164,24 @@ console.log('删除前页面 picks:', before);
 console.log('删除后面板行数:', afterPanel, '页面 picks:', afterPage);
 
 // 再选一次，确认删掉的不回来
-await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 200, y: 430 }, tSid);
-await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 200, y: 430, button: 'left', clickCount: 1 }, tSid);
-await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 200, y: 430, button: 'left', clickCount: 1 }, tSid);
+await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 200, y: 130 }, tSid);
+await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 200, y: 130, button: 'left', clickCount: 1 }, tSid);
+await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 200, y: 130, button: 'left', clickCount: 1 }, tSid);
 await sleep(800);
 const finalState = await ev(pSid, `JSON.stringify({rows: document.querySelectorAll('#pickedBox .pick-row').length, hint: document.getElementById('sendHint')?.textContent})`);
 console.log('再选一个之后:', finalState);
+// 点页面空白：不应被当成一次选择
+await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 380, y: 700 }, tSid);
+await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 380, y: 700, button: 'left', clickCount: 1 }, tSid);
+await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 380, y: 700, button: 'left', clickCount: 1 }, tSid);
+await sleep(600);
+const afterBlank = await ev(pSid, `document.querySelectorAll('#pickedBox .pick-row').length`);
+console.log('点空白之后行数（应保持不变）:', afterBlank);
 const shot = await send('Page.captureScreenshot', { format: 'png' }, pSid);
 fs.writeFileSync(path.join(ROOT, 'test/out-pick.png'), Buffer.from(shot.result.data, 'base64'));
-console.log('截图: test/out-pick.png');
+const pageShot = await send('Page.captureScreenshot', { format: 'png' }, tSid);
+fs.writeFileSync(path.join(ROOT, 'test/out-pick-page.png'), Buffer.from(pageShot.result.data, 'base64'));
+console.log('截图: test/out-pick.png, test/out-pick-page.png');
 
 chrome.kill(); bridge.kill(); serve.kill();
 await fetch(`http://127.0.0.1:${BRIDGE_PORT}/shutdown`, { method: 'POST' }).catch(() => {});
