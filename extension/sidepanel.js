@@ -296,12 +296,20 @@ async function sendAll() {
 }
 
 // ── 消息 ──
+function chainNode(m) {
+  if (!m.tools?.length) return null;
+  const d = document.createElement('div');
+  d.className = 'chain';
+  d.innerHTML = m.tools.map((t) => `<div class="call">→ <b>${esc(t.name)}</b> ${esc(t.args || '')}</div>`).join('');
+  return d;
+}
+
 function buildMsg(m) {
   const div = document.createElement('div');
   div.className = `msg ${m.role}`;
-  const chain = m.tools?.length
-    ? `<div class="chain">${m.tools.map((t) => `<div class="call">→ <b>${esc(t.name)}</b> ${esc(t.args || '')}</div>`).join('')}</div>` : '';
-  div.innerHTML = `<div class="who">${m.role === 'assistant' ? esc(meta().label || tool) : '我'}</div>${esc(m.text)}${chain}`;
+  div.innerHTML = `<div class="who">${m.role === 'assistant' ? esc(meta().label || tool) : '我'}</div>${esc(m.text)}`;
+  const c = chainNode(m);
+  if (c) div.appendChild(c);
   return div;
 }
 
@@ -336,23 +344,37 @@ function pollReply(since) {
   const render = (msgs, sec, done) => {
     const last = msgs[msgs.length - 1];
     const tools = msgs.reduce((n, m) => n + (m.tools?.length || 0), 0);
-    const line = (last?.text || '').split('\n').find((x) => x.trim()) || '';
-    const short = line.length > 88 ? line.slice(0, 88) + '…' : line;
+    const text = last?.text || '';
+    const multi = msgs.length > 1;
+    const long = text.length > 110;
+    const needToggle = done && (multi || long || tools > 0);
+
     card.innerHTML = `
       <div class="live ${done ? 'ok' : ''}">${done ? '✅ 完成' : '等待回复'} · ${sec}s${
-        done ? ` · ${msgs.length} 条 · ${tools} 次工具` : ''}</div>
-      ${done && short ? `<div class="live-sum">${esc(short)}</div>` : ''}
-      ${done && msgs.length ? '<button class="link live-more">展开全部</button>' : ''}`;
+        done ? ` · ${msgs.length} 条${tools ? ` · ${tools} 次工具` : ''}` : ''}</div>
+      ${done && text ? `<div class="live-sum${long || multi ? ' clamp' : ''}">${esc(text)}</div>` : ''}
+      <div class="live-detail hidden"></div>
+      ${needToggle ? '<button class="link live-more">展开</button>' : ''}`;
+
     const more = card.querySelector('.live-more');
-    if (more) more.addEventListener('click', () => {
-      const d = card.querySelector('.live-detail');
-      if (d) { d.remove(); more.textContent = '展开全部'; return; }
-      const wrap = document.createElement('div');
-      wrap.className = 'live-detail';
-      msgs.forEach((m) => wrap.appendChild(buildMsg(m)));
-      card.appendChild(wrap);
-      more.textContent = '收起';
-    });
+    const sum = card.querySelector('.live-sum');
+    const detail = card.querySelector('.live-detail');
+    if (more) {
+      more.addEventListener('click', () => {
+        const open = detail.classList.toggle('hidden') === false;
+        if (multi) {
+          sum.classList.add('hidden');
+          if (open && !detail.childElementCount) msgs.forEach((m) => detail.appendChild(buildMsg(m)));
+        } else {
+          sum.classList.toggle('clamp', !open);
+          if (open && !detail.childElementCount) {
+            const c = chainNode(last);
+            if (c) detail.appendChild(c);
+          }
+        }
+        more.textContent = open ? '收起' : '展开';
+      });
+    }
   };
 
   const tick = async () => {
