@@ -117,20 +117,8 @@ cd annotation-bridge
 2. 右上角开 **开发者模式**
 3. **加载已解压的扩展程序** → 选 `extension/` 目录
 
-#### 为什么命令行加载不了
-
-Google 从 Chrome 137 起不再支持 `--load-extension`，142 又把临时开关 `DisableLoadExtensionCommandLineSwitch` 一起移除了。我实测了四种组合：
-
-| 浏览器 | 参数 | 结果 |
-|---|---|---|
-| Google Chrome 156（本机原版） | `--load-extension` | ❌ 静默忽略，**没有任何报错** |
-| Google Chrome 156 | `--load-extension` + `--disable-features=DisableLoadExtensionCommandLineSwitch` | ❌ 仍然忽略（开关已被移除） |
-| Chrome for Testing 148 | `--load-extension` | ✅ 正常加载 |
-| Chrome for Testing 148 | 同上 + 开关 | ✅ |
-
-结论：**日常使用走 `chrome://extensions` 手动加载，不受影响**；只有跑自动化测试时才需要 Chrome for Testing / Chromium。
-
-> 这个坑值得写清楚：命令行被静默忽略时，你会以为是扩展写错了，实际是浏览器根本不看这个参数。
+> **装不上？** 正式版 Chrome 从 137 起不再支持 `--load-extension` 命令行参数（静默忽略、不报错），
+> 只能用 `chrome://extensions` 手动加载。原因和实测记录见 [docs/loading-unpacked-extensions.md](docs/loading-unpacked-extensions.md)。
 
 ### 3. 用
 
