@@ -372,7 +372,8 @@ function bind() {
 
 async function init() {
   bind();
-  $('bridgeInfo').textContent = 'bridge · ' + bridge.replace(/^https?:\/\//, '');
+  const bi = $('bridgeInfo');
+  if (bi) bi.textContent = 'bridge · ' + bridge.replace(/^https?:\/\//, '');
   const st = await chrome.storage.local.get([K_TOOL, K_THREAD]);
   if (st[K_TOOL]) tool = st[K_TOOL];
   renderPicked();
