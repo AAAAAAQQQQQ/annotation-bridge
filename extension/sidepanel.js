@@ -8,10 +8,54 @@ let tools = [], tool = 'codex', sessions = [], selected = null, picked = null, p
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const meta = () => tools.find((t) => t.id === tool) || {};
 
+class ApiError extends Error {
+  constructor(msg, code) { super(msg); this.code = code; }
+}
+
+/** 把技术错误翻译成人话 */
+function friendly(e) {
+  const m = String(e?.message || e);
+  if (e?.code === 'OFFLINE' || /Failed to fetch|NetworkError|Load failed/i.test(m)) {
+    return '连不上本地服务 · 检查 bridge 是否在跑（终端执行 ./start.sh）';
+  }
+  if (/session not found/i.test(m)) return '这个会话找不到了 · 可能已被归档或删除';
+  if (/timeout|ETIMEDOUT/i.test(m)) return '目标程序响应超时 · 它可能正在跑别的任务';
+  if (/HTTP 5\d\d/.test(m)) return '目标程序报错了 · 点“展开全部”看细节';
+  return m.length > 120 ? m.slice(0, 120) + '…' : m;
+}
+
+function setOffline(on) {
+  $('offline')?.classList.toggle('hidden', !on);
+  $('status')?.classList.toggle('ok', !on);
+  if (on) { $('statusText') && ($('statusText').textContent = '离线'); startAutoRetry(); }
+  else stopAutoRetry();
+}
+
+let retryTimer = null;
+function startAutoRetry() {
+  if (retryTimer) return;
+  retryTimer = setInterval(async () => {
+    try { await fetch(bridge + '/health', { cache: 'no-store' }); await reconnect(); }
+    catch {}
+  }, 5000);
+}
+function stopAutoRetry() { clearInterval(retryTimer); retryTimer = null; }
+async function reconnect() {
+  const ok = await loadTools();
+  if (ok) { setOffline(false); await loadSessions(); await loadQueue(); hint('sendHint', '已重新连接', 'ok'); }
+}
+
 async function api(path, opts = {}) {
-  const res = await fetch(bridge + path, { headers: { 'content-type': 'application/json' }, ...opts });
+  let res;
+  try {
+    res = await fetch(bridge + path, { headers: { 'content-type': 'application/json' }, ...opts });
+  } catch {
+    setOffline(true);
+    throw new ApiError('连不上本地服务', 'OFFLINE');
+  }
   let data = null; try { data = await res.json(); } catch {}
-  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(data?.error || `HTTP ${res.status}`, res.status === 502 ? 'UPSTREAM' : 'HTTP');
+  setOffline(false);
   return data;
 }
 function setStatus(ok, t) { $('status')?.classList.toggle('ok', !!ok); const el = $('statusText'); if (el) el.textContent = t; }
@@ -98,7 +142,8 @@ async function loadSessions() {
     }
   } catch (e) {
     setStatus(false, '连接失败');
-    $('sessionList').innerHTML = '<div class="pop-empty">连不上 bridge<br/>先运行 ./start.sh</div>';
+    setOffline(true);
+    $('sessionList').innerHTML = '<div class="pop-empty">连不上本地服务<br/>终端执行 ./start.sh</div>';
   }
 }
 
@@ -178,7 +223,7 @@ async function grabConsole(silent) {
       renderCaps();
       hint('sendHint', `已附上 ${d.count} 条控制台日志`, 'ok');
     }
-  } catch (e) { if (!silent) hint('sendHint', '抓取失败：' + e.message, 'err'); }
+  } catch (e) { if (!silent) hint('sendHint', '抓取失败：' + friendly(e), 'err'); }
 }
 
 async function takeShot() {
@@ -188,7 +233,7 @@ async function takeShot() {
     captures.push({ kind: 'screenshot', path: d.path });
     renderCaps();
     hint('sendHint', '已截图，会随下一条标注一起发', 'ok');
-  } catch (e) { hint('sendHint', '截图失败：' + e.message, 'err'); }
+  } catch (e) { hint('sendHint', '截图失败：' + friendly(e), 'err'); }
 }
 
 // ── 队列 ──
@@ -208,7 +253,7 @@ async function loadQueue() {
       await api('/queue/clear', { method: 'POST', body: JSON.stringify({ thread: selected.id }) });
       await loadQueue();
     }));
-  } catch (e) { hint('sendHint', '读队列失败：' + e.message, 'err'); }
+  } catch (e) { hint('sendHint', '读队列失败：' + friendly(e), 'err'); }
 }
 
 async function addToQueue() {
@@ -226,7 +271,7 @@ async function addToQueue() {
     $('comment').value = ''; $('comment').focus();
     hint('sendHint', '已加入队列', 'ok');
     await loadQueue();
-  } catch (e) { hint('sendHint', '入队失败：' + e.message, 'err'); }
+  } catch (e) { hint('sendHint', '入队失败：' + friendly(e), 'err'); }
 }
 
 async function sendAll() {
@@ -243,7 +288,7 @@ async function sendAll() {
     await loadQueue();
     if (d.replyText) { appendMessages([{ role: 'assistant', text: d.replyText, tools: [] }]); hint('sendHint', '已返回结果', 'ok'); }
     else pollReply(startedAt);
-  } catch (e) { hint('sendHint', '发送失败：' + e.message, 'err'); }
+  } catch (e) { hint('sendHint', '发送失败：' + friendly(e), 'err'); }
   finally { $('btnSend').disabled = false; }
 }
 
@@ -271,7 +316,7 @@ async function loadRecent() {
     $('messages').innerHTML = '';
     appendMessages(d.messages || []);
     if (!d.messages?.length) $('messages').innerHTML = '<div class="empty">没有历史消息</div>';
-  } catch (e) { hint('sendHint', '读消息失败：' + e.message, 'err'); }
+  } catch (e) { hint('sendHint', '读消息失败：' + friendly(e), 'err'); }
 }
 
 function pollReply(since) {
@@ -364,7 +409,7 @@ async function runNew() {
     $('messages').innerHTML = '';
     appendMessages([{ role: 'assistant', text: d.replyText || '(无输出)', tools: [] }]);
     hint('sendHint', d.threadId ? '新会话已创建' : '已执行（未拿到会话 ID）', 'ok');
-  } catch (e) { hint('newHint', '创建失败：' + e.message, 'err'); }
+  } catch (e) { hint('newHint', '创建失败：' + friendly(e), 'err'); }
   finally { $('btnNewRun').disabled = false; }
 }
 
@@ -381,6 +426,7 @@ function switchTab(name) {
 // ── 绑定 ──
 function bind() {
   $('btnRefresh').addEventListener('click', loadSessions);
+  $('btnRetry').addEventListener('click', reconnect);
   $('btnSession').addEventListener('click', () => { switchTab('sessions'); $('search').focus(); });
   $('search').addEventListener('input', renderList);
   $('btnUseId').addEventListener('click', () => {
