@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 300" width="960" height="300" font-family="-apple-system, 'PingFang SC', 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7280"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f6feb"/>
+    </marker>
+  </defs>
+
+  <rect width="960" height="300" fill="#ffffff"/>
+
+  <!-- 1 网页 -->
+  <rect x="24" y="90" width="150" height="96" rx="10" fill="#f4f6f9" stroke="#e5e7eb"/>
+  <text x="99" y="122" text-anchor="middle" font-size="14" font-weight="600" fill="#111827">网页</text>
+  <text x="99" y="144" text-anchor="middle" font-size="11.5" fill="#6b7280">Alt+点击 选元素</text>
+  <text x="99" y="164" text-anchor="middle" font-size="11" fill="#9ca3af" font-family="ui-monospace, Menlo, monospace">.card:nth-child(3)</text>
+
+  <line x1="174" y1="138" x2="214" y2="138" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="194" y="126" text-anchor="middle" font-size="10" fill="#9ca3af">选择器</text>
+
+  <!-- 2 侧边栏 -->
+  <rect x="214" y="60" width="196" height="156" rx="10" fill="#f4f6f9" stroke="#1f6feb" stroke-width="1.5"/>
+  <rect x="214" y="60" width="196" height="30" rx="10" fill="#1f6feb"/>
+  <rect x="214" y="82" width="196" height="8" fill="#1f6feb"/>
+  <text x="312" y="80" text-anchor="middle" font-size="12.5" font-weight="600" fill="#ffffff">Chrome 侧边栏</text>
+  <text x="232" y="114" font-size="11.5" fill="#111827">目标会话 · 最近使用</text>
+  <text x="232" y="136" font-size="11.5" fill="#111827">队列  3 条</text>
+  <text x="232" y="158" font-size="11.5" fill="#111827">[ 全部发送 ]</text>
+  <text x="232" y="186" font-size="10.5" fill="#6b7280">Ctrl 攒批，再一次投递</text>
+
+  <line x1="410" y1="138" x2="450" y2="138" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="430" y="126" text-anchor="middle" font-size="10" fill="#9ca3af">HTTP</text>
+
+  <!-- 3 bridge -->
+  <rect x="450" y="76" width="170" height="124" rx="10" fill="#111827"/>
+  <text x="535" y="108" text-anchor="middle" font-size="13" font-weight="600" fill="#ffffff">bridge.mjs</text>
+  <text x="535" y="130" text-anchor="middle" font-size="11" fill="#9ca3af" font-family="ui-monospace, Menlo, monospace">127.0.0.1:47391</text>
+  <text x="535" y="152" text-anchor="middle" font-size="10.5" fill="#6b7280">本地 · 零依赖 · node</text>
+  <text x="535" y="174" text-anchor="middle" font-size="10.5" fill="#6b7280">读 ~/.codex/sessions</text>
+
+  <line x1="620" y1="138" x2="660" y2="138" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="640" y="126" text-anchor="middle" font-size="10" fill="#9ca3af">exec</text>
+
+  <!-- 4 codex queue -->
+  <rect x="660" y="90" width="128" height="96" rx="10" fill="#f4f6f9" stroke="#e5e7eb"/>
+  <text x="724" y="122" text-anchor="middle" font-size="12" font-weight="600" fill="#111827" font-family="ui-monospace, Menlo, monospace">codex queue</text>
+  <text x="724" y="144" text-anchor="middle" font-size="10.5" fill="#6b7280">--thread --message</text>
+  <text x="724" y="166" text-anchor="middle" font-size="10.5" fill="#0e9f6e">官方子命令</text>
+
+  <line x1="788" y1="138" x2="828" y2="138" stroke="#6b7280" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 5 会话 -->
+  <rect x="828" y="90" width="108" height="96" rx="10" fill="#eef9f4" stroke="#0e9f6e"/>
+  <text x="882" y="122" text-anchor="middle" font-size="13" font-weight="600" fill="#0e9f6e">Codex 会话</text>
+  <text x="882" y="144" text-anchor="middle" font-size="10.5" fill="#6b7280">排队 → 执行</text>
+  <text x="882" y="164" text-anchor="middle" font-size="10.5" fill="#6b7280">写回 jsonl</text>
+
+  <!-- 回流 -->
+  <path d="M 882 186 L 882 232 L 535 232 L 535 200" fill="none" stroke="#1f6feb" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrowBlue)"/>
+  <text x="708" y="250" text-anchor="middle" font-size="10.5" fill="#1f6feb">轮询 /reply 读回 assistant 回复</text>
+</svg>

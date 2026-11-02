@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark"></span>标注投递</div>
+    <div class="status" id="status"><i></i><span id="statusText">连接中…</span></div>
+  </header>
+
+  <div class="tools" id="toolTabs"></div>
+
+  <main>
+    <!-- 目标会话 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>目标会话</h2>
+        <div class="head-actions">
+          <button class="ghost" id="btnNew">＋ 新建</button>
+          <button class="ghost icon" id="btnRefresh" title="刷新">⟳</button>
+        </div>
+      </div>
+
+      <button class="picker" id="btnSession">
+        <span class="picker-main">
+          <b id="selTitle">未选择会话</b>
+          <small id="selSub">点这里选一个正在用的会话</small>
+        </span>
+        <span class="chev">▾</span>
+      </button>
+
+      <div class="pop hidden" id="sessionPop">
+        <input id="search" class="input" placeholder="搜索项目 / 名字 / ID" />
+        <div class="pop-list" id="sessionList"></div>
+        <div class="pop-foot">
+          <input id="manualId" class="input mono" placeholder="或粘贴会话 ID" />
+          <button class="ghost" id="btnUseId">使用</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 标注 -->
+    <section class="card">
+      <div class="card-head"><h2>标注</h2></div>
+
+      <button class="pick-area" id="btnPick">
+        <span class="pick-plus">＋</span>
+        <span class="pick-copy">
+          <b>点击选择页面元素</b>
+          <small>悬停高亮 · Esc 取消</small>
+        </span>
+      </button>
+
+      <div class="picked hidden" id="pickedBox">
+        <code id="pickedSel"></code>
+        <div class="muted" id="pickedTxt"></div>
+      </div>
+
+      <div class="caps">
+        <label class="switch"><input type="checkbox" id="capConsole" checked><span></span>捕获控制台</label>
+        <span class="muted" id="consoleCount">0 条</span>
+        <button class="ghost" id="btnGrabLogs">抓取</button>
+        <span class="sep"></span>
+        <button class="ghost" id="btnShot">＋ 截图</button>
+        <button class="ghost" id="btnClearCaps">清除</button>
+      </div>
+      <div class="chips hidden" id="capsChips"></div>
+
+      <textarea id="comment" class="input" rows="2" placeholder="写一句备注，例如：这个间距太挤"></textarea>
+
+      <div class="row">
+        <select id="severity" class="input sm">
+          <option value="important">重要</option>
+          <option value="suggestion">建议</option>
+          <option value="blocking">阻塞</option>
+        </select>
+        <button class="primary" id="btnQueue">加入队列</button>
+      </div>
+    </section>
+
+    <!-- 队列 -->
+    <section class="card">
+      <div class="card-head">
+        <h2>队列 <span class="pill" id="queueCount">0</span></h2>
+        <button class="ghost" id="btnClearQueue">清空</button>
+      </div>
+
+      <div class="qlist" id="queue"></div>
+
+      <div class="opts">
+        <label><span>方式</span><select id="mode" class="input sm"></select></label>
+        <label><span>模型</span><select id="model" class="input sm"></select></label>
+        <label><span>强度</span><select id="effort" class="input sm"></select></label>
+      </div>
+
+      <button class="primary block" id="btnSend">发送到该会话</button>
+      <div class="hint hidden" id="sendHint"></div>
+    </section>
+
+    <!-- 回复 -->
+    <section class="card grow">
+      <div class="card-head">
+        <h2>回复</h2>
+        <button class="ghost" id="btnLoadMsgs">读最近</button>
+      </div>
+      <div class="messages" id="messages"></div>
+    </section>
+  </main>
+
+  <footer><span id="bridgeInfo">bridge</span></footer>
+
+  <!-- 新建会话 -->
+  <div class="modal hidden" id="newModal">
+    <div class="sheet">
+      <div class="sheet-head">
+        <b>新建会话</b>
+        <button class="ghost icon" id="btnNewClose">✕</button>
+      </div>
+      <label class="field"><span>工作目录</span>
+        <input id="newCwd" class="input mono" placeholder="/Users/gjr/Project/xxx" />
+      </label>
+      <div class="opts">
+        <label><span>模型</span><select id="newModel" class="input sm"></select></label>
+        <label><span>强度</span><select id="newEffort" class="input sm"></select></label>
+      </div>
+      <label class="field"><span>第一句话</span>
+        <textarea id="newMsg" class="input" rows="4" placeholder="会自动带上队列里的标注"></textarea>
+      </label>
+      <button class="primary block" id="btnNewRun">创建并发送</button>
+      <div class="hint hidden" id="newHint"></div>
+    </div>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

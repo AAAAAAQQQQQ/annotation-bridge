@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 700" width="420" height="700" font-family="-apple-system, 'PingFang SC', 'Segoe UI', sans-serif">
+  <rect width="420" height="700" fill="#ffffff"/>
+  <rect x="0" y="0" width="420" height="700" fill="#f7f8fa" stroke="#e5e7eb"/>
+
+  <!-- header -->
+  <rect x="0" y="0" width="420" height="48" fill="#f7f8fa"/>
+  <line x1="0" y1="48" x2="420" y2="48" stroke="#e5e7eb"/>
+  <text x="16" y="29" font-size="14" font-weight="700" fill="#111827">标注</text>
+  <text x="58" y="29" font-size="12" fill="#6b7280">投递到 Codex</text>
+  <circle cx="330" cy="24" r="4" fill="#0e9f6e"/>
+  <text x="340" y="28" font-size="10.5" fill="#6b7280">已连接 · 6 个会话</text>
+
+  <!-- 目标会话 -->
+  <rect x="10" y="58" width="400" height="196" rx="10" fill="#f7f8fa" stroke="#e5e7eb"/>
+  <text x="24" y="82" font-size="11" fill="#6b7280">目标会话</text>
+  <text x="352" y="82" font-size="11" fill="#6b7280">刷新</text>
+  <rect x="24" y="92" width="372" height="28" rx="7" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="34" y="111" font-size="11" fill="#9ca3af">搜索项目 / 标题 / 会话 ID</text>
+
+  <rect x="24" y="128" width="372" height="46" rx="7" fill="#ffffff" stroke="#1f6feb"/>
+  <text x="34" y="146" font-size="11.5" fill="#111827">你看看同一个目录下的8088服务窗口对话。</text>
+  <text x="34" y="164" font-size="10" fill="#6b7280">category_tree_analysis  01a18c4a  2 小时前</text>
+
+  <rect x="24" y="180" width="372" height="46" rx="7" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="34" y="198" font-size="11.5" fill="#111827">(11/01 08:20 · category_tree_analysis)</text>
+  <text x="34" y="216" font-size="10" fill="#6b7280">category_tree_analysis  01a0e6c2  昨天</text>
+
+  <rect x="24" y="236" width="372" height="10" rx="5" fill="#e5e7eb"/>
+
+  <!-- 元素 -->
+  <rect x="10" y="264" width="400" height="150" rx="10" fill="#f7f8fa" stroke="#e5e7eb"/>
+  <text x="24" y="288" font-size="11" fill="#6b7280">元素</text>
+  <rect x="332" y="274" width="64" height="24" rx="7" fill="#1f6feb"/>
+  <text x="364" y="290" font-size="11" font-weight="600" fill="#ffffff" text-anchor="middle">选择元素</text>
+
+  <rect x="24" y="300" width="372" height="44" rx="7" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="34" y="318" font-size="10.5" fill="#1f6feb" font-family="ui-monospace, Menlo, monospace">body &gt; main &gt; .card:nth-of-type(3)</text>
+  <text x="34" y="334" font-size="10" fill="#6b7280">div · BR 36 / 40 · N/30 对照</text>
+
+  <rect x="24" y="352" width="372" height="22" rx="7" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="34" y="367" font-size="11" fill="#9ca3af">写一句备注，例如：这个卡片间距太挤</text>
+
+  <!-- 队列 -->
+  <rect x="10" y="424" width="400" height="170" rx="10" fill="#f7f8fa" stroke="#e5e7eb"/>
+  <text x="24" y="448" font-size="11" fill="#6b7280">队列</text>
+  <rect x="58" y="438" width="26" height="14" rx="7" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="71" y="449" font-size="9" fill="#6b7280" text-anchor="middle">3</text>
+  <text x="360" y="448" font-size="11" fill="#6b7280">清空</text>
+
+  <rect x="24" y="458" width="372" height="38" rx="7" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="34" y="474" font-size="11.5" fill="#111827">这个卡片间距太挤</text>
+  <text x="34" y="488" font-size="9.5" fill="#6b7280" font-family="ui-monospace, Menlo, monospace">body &gt; main &gt; .card:nth-of-type(3)</text>
+
+  <rect x="24" y="502" width="372" height="38" rx="7" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="34" y="518" font-size="11.5" fill="#111827">标题字号建议 28px</text>
+  <text x="34" y="532" font-size="9.5" fill="#6b7280" font-family="ui-monospace, Menlo, monospace">h1.title</text>
+
+  <rect x="24" y="548" width="372" height="34" rx="8" fill="#1f6feb"/>
+  <text x="210" y="570" font-size="12" font-weight="600" fill="#ffffff" text-anchor="middle">全部发送到该会话</text>
+
+  <!-- 回复 -->
+  <rect x="10" y="604" width="400" height="86" rx="10" fill="#f7f8fa" stroke="#e5e7eb"/>
+  <text x="24" y="626" font-size="11" fill="#6b7280">会话回复</text>
+  <rect x="24" y="636" width="372" height="44" rx="7" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="34" y="653" font-size="9" fill="#6b7280">Codex</text>
+  <text x="34" y="669" font-size="10.5" fill="#111827">已改：卡片间距 8px → 16px，标题 24px → 28px</text>
+</svg>
