@@ -794,6 +794,7 @@ async function sendAll() {
       model: $('model').value || undefined, effort: $('effort').value || undefined }) });
     lastSend.count = d.count;
     if (d.dryRun) hint('sendHint', `DRY_RUN：已生成 ${d.count} 条，未真正投递`, 'ok');
+    else if (d.mode === 'queue') hint('sendHint', `已写入 Codex 队列 ${d.count} 条 · 正在跑的回合结束后才会发出去（不是插队）`, 'ok');
     else hint('sendHint', `已投递 ${d.count} 条 · ${d.mode}${d.effort ? ' · ' + d.effort : ''}`, 'ok');
     await loadQueue(); await refreshSummary();
     if (d.replyText) { appendMessages([{ role: 'assistant', text: d.replyText, tools: [] }]); hint('sendHint', '已返回结果', 'ok'); }
