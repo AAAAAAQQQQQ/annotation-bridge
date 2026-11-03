@@ -51,6 +51,18 @@ gpt-6-luna      default=medium  支持=low,medium,high,xhigh,max
 > （`runs under agent preset ... which the one-shot runner does not compose`）。
 > 所以面板里这类会话会标 **「只读」**：能读历史，不能投递。要投递就用 Codex，或者用 headless 新建的会话。
 
+**给 DSH headless 配模型凭据**
+
+headless profile 默认走 `deepseek-official`，需要 `DEEPSEEK_API_KEY`；DSH 启动时会读 `~/.dsh/.env`：
+
+```bash
+./scripts/set-deepseek-key.sh     # 交互式输入，写入 ~/.dsh/.env（chmod 600）
+```
+
+这个文件在仓库外，`.gitignore` 也兜底忽略了 `.env` / `.env.*` / `*.key`。
+配好后 `dsh --profile headless --json "只回复 ok"` 能返回内容，面板里 headless 建的会话就可以直接投递了。
+（headless runner 还要求运行时目录和会话记录的目录一致，bridge 会自动用会话的 cwd。）
+
 **排队 ≠ 续跑**，这两个不是一回事：
 
 - **排队（queue）** —— 把消息塞进**正在跑**的那个会话的队列。**任何 `-c` 覆盖都会被拒绝**（`cannot queue through an embedded app server while a local app-server daemon is running`），所以模型和强度都不能换。适合"我一边看着它干活，一边插话"。

@@ -283,8 +283,10 @@ const dsh = {
     }
     const env = { ...process.env };
     delete env.all_proxy; delete env.ALL_PROXY;
+    // headless 要求 cwd 和会话记录的一致，否则 assertAdoptable 直接拒绝
+    const cwd = session?.cwd && exists(session.cwd) ? session.cwd : process.cwd();
     const r = await execFileP(BIN.dsh, ['--profile', 'headless', '--session-id', thread, message],
-      { timeout: 15 * 60 * 1000, maxBuffer: 32 * 1024 * 1024, env });
+      { timeout: 15 * 60 * 1000, maxBuffer: 32 * 1024 * 1024, env, cwd });
     return { mode: 'headless', model: 'profile 默认', replyText: (r.stdout || '').trim() };
   },
 };

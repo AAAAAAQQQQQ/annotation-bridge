@@ -32,6 +32,7 @@ function friendly(e) {
   if (/HTTP 5\d\d/.test(m)) return '目标程序报错了 · 点“展开全部”看细节';
   if (/MISSING_CREDENTIAL|no API key/i.test(m)) return 'DSH 的 headless 通道没有模型凭据 · 需要给 headless profile 配 DEEPSEEK_API_KEY';
   if (/ACCOUNT_SIGN_IN_REQUIRED/i.test(m)) return 'DSH 的 headless 通道没登录账号 · 需要单独给它配凭据';
+  if (/was recorded in .*, not/i.test(m)) return '这个 DSH 会话原目录对不上，headless 无法续跑';
   return m.length > 120 ? m.slice(0, 120) + '…' : m;
 }
 
