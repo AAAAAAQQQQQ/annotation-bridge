@@ -421,7 +421,12 @@ function composeMessage(items) {
     out.push(`   备注：${it.comment}`);
     for (const c of it.captures || []) {
       if (c.kind === 'screenshot') out.push(`   截图：${c.path}`);
-      if (c.kind === 'console') out.push(`   控制台：${c.count} 条（${c.path}）`);
+      if (c.kind === 'console') {
+        const bits = [`日志 ${c.count} 条`];
+        if (c.netCount) bits.push(`请求 ${c.netCount}`);
+        if (c.perfCount) bits.push(`资源耗时 ${c.perfCount} 条`);
+        out.push(`   ${bits.join(' · ')}（${c.path}）`);
+      }
     }
     out.push('');
   });
@@ -429,7 +434,7 @@ function composeMessage(items) {
   const consoles = allCaps.filter((c) => c.kind === 'console');
   if (consoles.length) {
     const lines = consoles[0].preview || [];
-    out.push('## 页面控制台 / 网络（最近的错误）');
+    out.push('## 页面日志 / 网络（错误与慢请求）');
     out.push(...lines.map((l) => `- ${l}`));
     out.push('');
   }
@@ -566,15 +571,32 @@ const server = http.createServer(async (req, res) => {
       if (b.kind === 'console') {
         const logs = Array.isArray(b.logs) ? b.logs.slice(-80) : [];
         const net = Array.isArray(b.net) ? b.net.slice(-50) : [];
+        // performance API 拿到的「页面已经发过的请求」：注入前发生的也有，用来定位慢接口
+        const perf = b.perf && typeof b.perf === 'object' ? {
+          resources: Array.isArray(b.perf.resources) ? b.perf.resources.slice(0, 60) : [],
+          total: Number(b.perf.total) || 0,
+          nav: b.perf.nav || null,
+        } : null;
         const file = path.join(CAP_DIR, `${id}.json`);
-        fs.writeFileSync(file, JSON.stringify({ logs, net }, null, 2));
+        fs.writeFileSync(file, JSON.stringify({ logs, net, perf }, null, 2));
+
+        const resources = perf?.resources || [];
+        const slow = resources.filter((r) => (r.ms || 0) >= 300).slice(0, 8);
         const preview = [
+          ...(perf?.nav ? [`[页面] TTFB ${perf.nav.ttfb}ms · DCL ${perf.nav.dcl}ms · load ${perf.nav.load}ms`] : []),
+          ...slow.map((r) => `[慢 ${r.ms}ms] ${r.type || 'request'} ${String(r.url).slice(0, 140)}${r.status ? ` (${r.status})` : ''}`),
           ...logs.filter((l) => l.level === 'error' || l.level === 'warn')
             .slice(-6).map((l) => `[${l.level}] ${String(l.text).slice(0, 160)}`),
           ...net.filter((n) => !n.ok)
             .slice(-6).map((n) => `[网络 ${n.status || 'ERR'}] ${n.method} ${n.url}${n.ms ? ` (${n.ms}ms)` : ''}`),
-        ];
-        return json(res, 200, { id, kind: 'console', path: file, url: `/capture/file?id=${id}`, count: logs.length, netCount: net.length, preview, ts });
+        ].slice(0, 24);
+
+        return json(res, 200, {
+          id, kind: 'console', path: file, url: `/capture/file?id=${id}`,
+          count: logs.length, netCount: net.length,
+          perfCount: resources.length, perfTotal: perf?.total || 0,
+          preview, ts,
+        });
       }
       return json(res, 400, { error: 'unknown capture kind' });
     }

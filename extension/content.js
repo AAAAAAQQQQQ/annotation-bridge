@@ -265,11 +265,41 @@
     highlightEl = h;
   }
 
+  // 页面已经发过的请求，用 Resource Timing 补一份（注入前发生的也能拿到）
+  function perfSnapshot() {
+    try {
+      const res = (performance.getEntriesByType('resource') || [])
+        .filter((r) => r.name && !r.name.startsWith('chrome-extension://'))
+        .map((r) => ({
+          url: String(r.name).slice(0, 300),
+          type: r.initiatorType || '',
+          ms: Math.round(r.duration),
+          ttfb: Math.round((r.responseStart || 0) - (r.startTime || 0)),
+          size: r.transferSize || 0,
+          status: r.responseStatus || 0,
+        }))
+        .sort((a, b) => b.ms - a.ms);
+      const nav = (performance.getEntriesByType('navigation') || [])[0];
+      return {
+        resources: res.slice(0, 60),
+        total: res.length,
+        nav: nav ? {
+          ttfb: Math.round(nav.responseStart || 0),
+          dcl: Math.round(nav.domContentLoadedEventEnd || 0),
+          load: Math.round(nav.loadEventEnd || 0),
+        } : null,
+      };
+    } catch { return null; }
+  }
+
   chrome.runtime.onMessage.addListener((msg, _s, reply) => {
     if (msg?.type === 'START_PICK') { startPick(); reply({ ok: true }); }
     if (msg?.type === 'STOP_PICK') { stopPick(); reply({ ok: true }); }
     if (msg?.type === 'PING') reply({ ok: true });
-    if (msg?.type === 'GET_LOGS') reply({ ok: true, logs: logs.slice(-80), total: logs.length, net: net.slice(-50) });
+    if (msg?.type === 'GET_LOGS') reply({
+      ok: true, logs: logs.slice(-80), total: logs.length,
+      net: net.slice(-50), perf: perfSnapshot(),
+    });
     if (msg?.type === 'GET_PICKS') reply({ ok: true, items: picked, picking });
     if (msg?.type === 'REMOVE_PICK') {
       picked = picked.filter((x) => x.selector !== msg.selector);

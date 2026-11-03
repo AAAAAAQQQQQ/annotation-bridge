@@ -420,7 +420,7 @@ function renderCaps() {
         <span class="x" data-i="${i}">✕</span>
       </div>`;
     }
-    return `<span class="chip console-chip" data-i="${i}" title="点击查看全部日志">🖥 日志 ${c.count}${c.netCount ? ` · 网络 ${c.netCount}` : ''}<span class="x" data-i="${i}">✕</span></span>`;
+    return `<span class="chip console-chip" data-i="${i}" title="点击查看全部日志">🖥 日志 ${c.count}${c.netCount ? ` · 请求 ${c.netCount}` : ''}${c.perfCount ? ` · 资源 ${c.perfCount}` : ''}<span class="x" data-i="${i}">✕</span></span>`;
   }).join('');
 
   box.querySelectorAll('.x').forEach((el) => el.addEventListener('click', (e) => {
@@ -478,25 +478,45 @@ async function refreshConsoleCount() {
 }
 
 async function grabConsole(silent) {
-  const tab = await activeTab();
-  if (!tab?.tabId) { if (!silent) hint('sendHint', '没有可用的页面', 'err'); return; }
-  if (!(await ensureContent(tab.tabId))) {
-    if (!silent) hint('sendHint', '这个页面不允许注入脚本（chrome:// 或扩展页）', 'err');
-    return;
-  }
+  const btn = $('btnGrabLogs');
+  if (!silent && btn) { btn.disabled = true; hint('sendHint', '正在读取页面日志…'); }
   try {
+    const tab = await activeTab();
+    if (!tab?.tabId) { if (!silent) hint('sendHint', '没有可用的页面（先切到网页标签页）', 'err'); return; }
+    if (!(await ensureContent(tab.tabId))) {
+      if (!silent) hint('sendHint', '这个页面不允许注入脚本（chrome:// 或扩展页）', 'err');
+      return;
+    }
     const r = await chrome.tabs.sendMessage(tab.tabId, { type: 'GET_LOGS' });
     const n = r?.total ?? 0;
+    const netCount = (r?.net || []).length;
+    const perfCount = r?.perf?.total ?? 0;
     const netFail = (r?.net || []).filter((x) => !x.ok).length;
-    setConsoleCount(n ? `${n} 条${netFail ? ` · 网络失败 ${netFail}` : ''}` : '0 条');
-    if (!silent) {
-      if (!n) return hint('sendHint', '这个页面还没记录到日志 · 刚注入的话，刷新页面后再试', '');
-      const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'console', logs: r.logs, net: r.net }) });
-      captures.push({ kind: 'console', id: d.id, count: d.count, netCount: d.netCount || 0, path: d.path, url: d.url, preview: d.preview });
-      renderCaps();
-      hint('sendHint', `已附上 ${d.count} 条日志 · ${d.netCount || 0} 个请求`, 'ok');
+    setConsoleCount(n ? `${n} 条${netFail ? ` · 网络失败 ${netFail}` : ''}` : (perfCount ? `${perfCount} 个请求` : '0 条'));
+    if (silent) return;
+
+    // 控制台没日志也不代表没东西可看：Resource Timing 里有页面已经发过的请求
+    if (!n && !perfCount) {
+      hint('sendHint', '这个页面没有可读的日志或请求记录 · 刷新页面后再试', 'err');
+      return;
     }
-  } catch (e) { if (!silent) hint('sendHint', '读取失败：' + friendly(e), 'err'); }
+    const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'console', logs: r.logs, net: r.net, perf: r.perf }) });
+    captures.push({
+      kind: 'console', id: d.id, count: d.count, netCount: d.netCount || 0,
+      perfCount: d.perfCount || 0, path: d.path, url: d.url, preview: d.preview,
+    });
+    renderCaps();
+    const bits = [`${d.count} 条日志`];
+    if (d.netCount) bits.push(`${d.netCount} 个请求`);
+    if (d.perfCount) bits.push(`${d.perfCount} 条资源耗时`);
+    hint('sendHint', `已附上 ${bits.join(' · ')}`, 'ok');
+  } catch (e) {
+    if (!silent) hint('sendHint', '读取失败：' + friendly(e), 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+    // 提示在表单下方，滚一下保证用户看得到
+    if (!silent) $('sendHint')?.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 

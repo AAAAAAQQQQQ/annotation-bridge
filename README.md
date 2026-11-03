@@ -408,5 +408,18 @@ APP="$HOME/Applications/标注投递.app/Contents/MacOS/AnnotationBridge"
   以及 `error` / `unhandledrejection`，通过 `postMessage` 转给隔离世界的内容脚本。网络记录含方法、URL、状态码、耗时，
   4xx/5xx 会带一段响应片段，并监听 `window.onerror` 与 `unhandledrejection`，保留最近 200 条。面板里点「读取日志」会把日志存到 `~/.annotation-bridge/captures/<id>.json`，随标注一起投递（消息里带错误/warn 摘要）。
 计数每 3 秒自动刷新；如果显示「未注入」，说明这个页面是在扩展加载前打开的——点「读取日志」会补注入（只对之后的输出有效），刷新页面则能从开头捕获。
+
+**已经发生过的请求也能抓到**：点「读取日志」时还会读 `performance.getEntriesByType('resource')`，
+把页面加载至今所有资源的耗时按慢到快排出来（注入前发生的也在），并带上网关级导航耗时。
+投递给 agent 的消息里会有这样一段：
+
+```text
+## 页面日志 / 网络（错误与慢请求）
+- [页面] TTFB 812ms · DCL 1500ms · load 2400ms
+- [慢 2300ms] fetch http://x/api/slow (500)
+- [error] Uncaught TypeError: x is undefined
+```
+
+所以控制台一条日志都没有时，点「读取日志」也不会白点——它会告诉你最慢的是哪几个请求。
 - **截图**：`chrome.tabs.captureVisibleTab` 抓当前可见区域，存成 PNG，路径写进投递消息。
 - 两条都会作为「附件」挂在标注上，入队后清空。
