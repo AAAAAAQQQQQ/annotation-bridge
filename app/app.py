@@ -239,10 +239,10 @@ def notify_once(text, title):
 
 # ── GUI ─────────────────────────────────────────────
 
-def gui(s):
+def gui(s, show_window=True):
     import objc
     from AppKit import (
-        NSApplication, NSApplicationActivationPolicyAccessory, NSAlert, NSBezierPath,
+        NSApplication, NSApplicationActivationPolicyRegular, NSAlert, NSBezierPath,
         NSColor, NSImage, NSImageSymbolConfiguration, NSMenu, NSMenuItem,
         NSStatusBar, NSVariableStatusItemLength,
         NSWorkspace, NSControlStateValueOn, NSControlStateValueOff,
@@ -267,6 +267,12 @@ def gui(s):
             self.status_item = None
             self.menu = None
             self._icons = {}
+            self.window = None
+            self.win_status = None
+            self.win_meta = None
+            self.win_ext = None
+            self.win_login = None
+            self.show_on_launch = True
             return self
 
         # 启动
@@ -280,10 +286,93 @@ def gui(s):
             self.render()
             if self.health is None:
                 threading.Thread(target=self.boot_start, daemon=True).start()
-            alog("GUI 启动，菜单栏图标已创建")
-            notify_once("图标在屏幕右上角菜单栏 · 点开可以打开标注面板", "标注投递 已启动")
+            self.build_window()
+            if self.show_on_launch:
+                self.show_window()
+            alog("GUI 启动，窗口和菜单栏图标已创建")
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 2.0, self, "tick:", None, True)
+
+        @objc.python_method
+        def build_window(self):
+            from AppKit import (NSWindow, NSTextField, NSButton, NSFont, NSColor,
+                                NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
+                                NSWindowStyleMaskMiniaturizable, NSBackingStoreBuffered,
+                                NSBezelStyleRounded, NSSwitchButton, NSLineBreakByWordWrapping)
+            w = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+                NSMakeRect(0, 0, 380, 356),
+                NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable,
+                NSBackingStoreBuffered, False)
+            w.setTitle_("标注投递")
+            w.setReleasedWhenClosed_(False)
+            w.center()
+            cv = w.contentView()
+
+            def label(text, rect, size=12, bold=False, color=None, wrap=False):
+                l = NSTextField.alloc().initWithFrame_(rect)
+                l.setStringValue_(text)
+                l.setBezeled_(False); l.setDrawsBackground_(False)
+                l.setEditable_(False); l.setSelectable_(False)
+                l.setFont_(NSFont.boldSystemFontOfSize_(size) if bold else NSFont.systemFontOfSize_(size))
+                if color is not None:
+                    l.setTextColor_(color)
+                l.cell().setLineBreakMode_(NSLineBreakByWordWrapping)
+                l.cell().setWraps_(wrap)
+                cv.addSubview_(l)
+                return l
+
+            def button(title, rect, action, key=None):
+                b = NSButton.alloc().initWithFrame_(rect)
+                b.setTitle_(title)
+                b.setBezelStyle_(NSBezelStyleRounded)
+                b.setTarget_(self)
+                b.setAction_(action)
+                if key:
+                    b.setKeyEquivalent_(key)
+                cv.addSubview_(b)
+                return b
+
+            label("标注投递", NSMakeRect(20, 308, 200, 24), size=17, bold=True)
+            self.win_status = label("● 已停止", NSMakeRect(20, 280, 340, 20), size=13, bold=True)
+            self.win_meta = label("端口 %d" % self.settings.port, NSMakeRect(20, 260, 340, 18), size=11,
+                                  color=NSColor.secondaryLabelColor())
+            self.win_ext = label("", NSMakeRect(20, 242, 340, 18), size=11,
+                                 color=NSColor.secondaryLabelColor())
+
+            button("打开标注面板", NSMakeRect(20, 188, 340, 38), "openPanel:", key="\r")
+            button("启动服务", NSMakeRect(20, 146, 106, 32), "startAction:")
+            button("停止服务", NSMakeRect(137, 146, 106, 32), "stopAction:")
+            button("重启服务", NSMakeRect(254, 146, 106, 32), "restartAction:")
+
+            button("打开日志", NSMakeRect(20, 106, 106, 30), "openLog:")
+            button("项目目录", NSMakeRect(137, 106, 106, 30), "openProject:")
+            self.win_login = NSButton.alloc().initWithFrame_(NSMakeRect(252, 106, 110, 30))
+            self.win_login.setButtonType_(NSSwitchButton)
+            self.win_login.setTitle_("登录自启")
+            self.win_login.setTarget_(self)
+            self.win_login.setAction_("toggleLogin:")
+            self.win_login.setState_(1 if os.path.exists(self.login_plist()) else 0)
+            cv.addSubview_(self.win_login)
+
+            label("面板由 Chrome 扩展以独立窗口弹出。\n"
+                  "菜单栏图标可能被系统挤掉，用 Dock 图标打开这个窗口就行。",
+                  NSMakeRect(20, 46, 340, 44), size=10.5, color=NSColor.tertiaryLabelColor(), wrap=True)
+            button("退出", NSMakeRect(300, 12, 60, 26), "quit:")
+
+            self.window = w
+
+        @objc.python_method
+        def show_window(self):
+            if self.window is not None:
+                self.window.makeKeyAndOrderFront_(None)
+                NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+        def showWindow_(self, _sender):
+            self.show_window()
+
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, _app, _has):
+            self.show_window()
+            return True
 
         @objc.python_method
         def boot_start(self):
@@ -348,6 +437,26 @@ def gui(s):
             if h is not None:
                 dot = "green" if h.get("extension") else "orange"
             try:
+                from AppKit import NSColor
+                if self.win_status is not None:
+                    color = {"green": NSColor.systemGreenColor(),
+                             "orange": NSColor.systemOrangeColor()}.get(dot, NSColor.secondaryLabelColor())
+                    self.win_status.setStringValue_("● " + self.state_text())
+                    self.win_status.setTextColor_(color)
+                if self.win_meta is not None:
+                    hh = self.health
+                    if hh:
+                        txt = "端口 %d · pid %s · v%s" % (self.settings.port, hh.get("pid", "?"), hh.get("version", "?"))
+                        if self.pending:
+                            txt += " · 待发 %d 条" % self.pending
+                    else:
+                        txt = "端口 %d · 服务未运行" % self.settings.port
+                    self.win_meta.setStringValue_(txt)
+                if self.win_ext is not None and self.health is not None:
+                    self.win_ext.setStringValue_("扩展：" + ("已连接" if self.health.get("extension") else "未连接（点一下 Chrome 的扩展图标）"))
+            except Exception as e:
+                alog("刷新窗口失败: %r" % (e,))
+            try:
                 from AppKit import NSFont, NSAttributedString, NSFontAttributeName, NSForegroundColorAttributeName
                 btn = self.status_item.button()
                 sym = status_symbol()
@@ -409,6 +518,7 @@ def gui(s):
                 add("端口 %d · 服务未运行" % s.port, enabled=False)
 
             m.addItem_(NSMenuItem.separatorItem())
+            add("打开控制面板", "showWindow:", image="slider.horizontal.3")
             add("打开标注面板", "openPanel:", "o", image="macwindow")
             m.addItem_(NSMenuItem.separatorItem())
 
@@ -497,6 +607,8 @@ def gui(s):
             if os.path.exists(p):
                 subprocess.run(["/bin/sh", "-c", "launchctl bootout gui/%d/com.gjr.annotation-bridge.gui 2>/dev/null" % os.getuid()])
                 os.remove(p)
+                if self.win_login is not None:
+                    self.win_login.setState_(0)
                 return
             exe = os.path.abspath(sys.argv[0])
             plist = (
@@ -505,7 +617,7 @@ def gui(s):
                 '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
                 '<plist version="1.0"><dict>\n'
                 '  <key>Label</key><string>com.gjr.annotation-bridge.gui</string>\n'
-                '  <key>ProgramArguments</key><array><string>%s</string></array>\n'
+                '  <key>ProgramArguments</key><array><string>%s</string><string>--quiet</string></array>\n'
                 '  <key>RunAtLoad</key><true/>\n'
                 '  <key>KeepAlive</key><false/>\n'
                 '</dict></plist>\n' % exe
@@ -515,6 +627,8 @@ def gui(s):
                 f.write(plist)
             subprocess.run(["/bin/sh", "-c", "launchctl bootstrap gui/%d %s 2>&1" % (os.getuid(), shq(p))],
                            capture_output=True)
+            if self.win_login is not None:
+                self.win_login.setState_(1)
             self.render()
 
         @objc.python_method
@@ -535,9 +649,22 @@ def gui(s):
         def quit_(self, _sender):
             NSApplication.sharedApplication().terminate_(None)
 
+    from AppKit import NSMenu, NSMenuItem
     app = NSApplication.sharedApplication()
-    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+    # 有 Dock 图标就得有个主菜单，否则 ⌘Q 不退
+    main_menu = NSMenu.alloc().init()
+    app_item = NSMenuItem.alloc().init()
+    main_menu.addItem_(app_item)
+    app_menu = NSMenu.alloc().init()
+    app_menu.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("关于标注投递", "showAbout:", ""))
+    app_menu.addItem_(NSMenuItem.separatorItem())
+    app_menu.addItem_(NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("退出标注投递", "terminate:", "q"))
+    app_item.setSubmenu_(app_menu)
+    app.setMainMenu_(main_menu)
+
     delegate = MenuBarApp.alloc().init()
+    delegate.show_on_launch = bool(show_window)
     app.setDelegate_(delegate)
     # 持有引用，防止被 GC
     globals()["_delegate"] = delegate
@@ -567,10 +694,12 @@ def selftest(s):
 def main():
     s = Settings()
     args = [a for a in sys.argv[1:] if a.startswith("--")]
+    quiet = "--quiet" in args
+    args = [a for a in args if a != "--quiet"]
     if args:
         cli(args[0], s)
         return
-    gui(s)
+    gui(s, show_window=not quiet)
 
 
 if __name__ == "__main__":
