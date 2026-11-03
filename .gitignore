@@ -5,3 +5,7 @@ node_modules/
 test/out-*.png
 .git-old-*
 .build/
+.env
+.env.*
+*.key
+deepseek.key
