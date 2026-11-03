@@ -12,6 +12,7 @@ let lastSend = null;         // 最近一次发送的参数，回复轮询用
 let captures = [];   // 待随下一条标注一起发送的截图/控制台
 let tools = [], tool = 'codex', sessions = [], selected = null, picked = [], pollTimer = null;
 let pickingActive = false;   // 面板这边记一下拾取状态，Esc 才能随时退出
+let queueLen = 0;            // 当前会话队列条数（发送按钮上显示）
 let pickTabId = null;        // 拾取发生在哪个标签页；切标签后别把消息发错地方
 
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -686,7 +687,9 @@ async function pasteFromClipboard() {
 // ── 队列 ──
 async function loadQueue() {
   if (!selected) {
-    $('queueCount').textContent = '0'; $('fabCount').textContent = '0';
+    queueLen = 0;
+    $('queueCount').textContent = '0';
+    updateSendButton();
     $('queue').innerHTML = '<div class="empty">还没选会话</div>';
     return;
   }
@@ -695,8 +698,9 @@ async function loadQueue() {
   try {
     const d = await api(`/queue?thread=${encodeURIComponent(selected.id)}&tool=${tool}`);
     const q = d.queue || [];
+    queueLen = q.length;
     $('queueCount').textContent = String(q.length);
-    $('fabCount').textContent = String(q.length);
+    updateSendButton();
     $('queue').innerHTML = q.length ? q.map((it) => `
       <div class="qitem"><span class="x" data-del="${it.id}">✕</span>
         <div class="c">${esc(it.comment)}</div>
@@ -713,13 +717,13 @@ async function loadQueue() {
 async function addToQueue() {
   if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
   const comment = $('comment').value.trim();
-  if (!comment) return hint('sendHint', '先写一句备注', 'err');
-  if (!picked.length) return hint('sendHint', '先在页面上选元素', 'err');
+  // 不选元素也能发：只写一句整页备注就行
+  if (!comment && !picked.length) return hint('sendHint', '写一句备注，或者先在页面上选个元素', 'err');
   try {
     if ($('capConsole').checked) await grabConsole(true);
     await api('/queue', { method: 'POST', body: JSON.stringify({
       tool, thread: selected.id, comment,
-      selector: picked[0].selector, text: picked[0].text, url: picked[0].url,
+      selector: picked[0]?.selector || '', text: picked[0]?.text || '', url: picked[0]?.url || (captures[0]?.url || ''),
       elements: picked.map((e) => ({ selector: e.selector, tag: e.tag, text: e.text })),
       severity: $('severity').value, captures: captures.slice() }) });
     captures = []; renderCaps();
@@ -733,7 +737,52 @@ async function addToQueue() {
   } catch (e) { hint('sendHint', '入队失败：' + friendly(e), 'err'); }
 }
 
+function isReadOnlySession() {
+  return tool === 'dsh' && !!selected?.preset;
+}
+
+/** 按钮文案：GUI 创建的 DSH 会话不能投递，按钮变成「复制」 */
+function updateSendButton() {
+  const b = $('btnSend');
+  if (!b) return;
+  if (isReadOnlySession()) {
+    b.innerHTML = '复制 ' + queueLen + ' 条';
+    b.title = '这个 DSH 会话是 GUI 创建的（headless 不能投递）· 复制后去 DSH 里 ⌘V 粘贴发送';
+  } else {
+    b.innerHTML = '发送 <b id="fabCount">' + queueLen + '</b>';
+    b.title = '';
+  }
+}
+
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  ta.remove();
+  return ok;
+}
+
+/** 给不能投递的会话生成完整消息并复制，用户粘到 DSH 里发 */
+async function copyComposed() {
+  if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
+  if (!queueLen) return hint('sendHint', '队列是空的 · 先把标注加入队列', 'err');
+  try {
+    const d = await api('/compose', { method: 'POST', body: JSON.stringify({ tool, thread: selected.id }) });
+    const ok = await copyText(d.message);
+    hint('sendHint', ok
+      ? `已复制 ${d.count} 条标注 · 去 DSH 会话里 ⌘V 粘贴发送`
+      : `复制失败 · 再点一次试试`, ok ? 'ok' : 'err');
+    $('sendHint')?.scrollIntoView({ block: 'nearest' });
+  } catch (e) { hint('sendHint', '复制失败：' + friendly(e), 'err'); }
+}
+
 async function sendAll() {
+  if (isReadOnlySession()) return copyComposed();
   if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
   $('btnSend').disabled = true;
   hint('sendHint', '发送中…');

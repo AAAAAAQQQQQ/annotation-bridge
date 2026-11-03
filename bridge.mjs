@@ -427,10 +427,16 @@ const saveQueue = (q) => writeJson(QUEUE_FILE, q);
 
 function composeMessage(items) {
   const url = items[0]?.url || '';
-  const out = [`【网页标注 · ${items.length} 条】${url ? ' 来源：' + url : ''}`, '', '我在页面上标了下面几处，请按选择器定位代码后逐条修改：', ''];
+  const anyEl = items.some((it) => ((it.elements && it.elements.length) ? it.elements : [{ selector: it.selector, text: it.text }])
+    .some((e) => e.selector || e.text));
+  const out = [`【网页标注 · ${items.length} 条】${url ? ' 来源：' + url : ''}`, '',
+    anyEl ? '我在页面上标了下面几处，请按选择器定位代码后逐条修改：' : '我没有指定具体元素，下面是整体备注，请结合页面判断该改哪里：', ''];
   items.forEach((it, i) => {
     const els = (it.elements && it.elements.length) ? it.elements : [{ selector: it.selector, text: it.text }];
-    if (els.length === 1) {
+    const hasEl = els.some((e) => e.selector || e.text);
+    if (!hasEl) {
+      out.push(`${i + 1}. （整页备注 · 没有指定具体元素）`);
+    } else if (els.length === 1) {
       out.push(`${i + 1}. \`${els[0].selector || '(未取到选择器)'}\``);
       if (els[0].text) out.push(`   元素文本：${els[0].text.slice(0, 120)}`);
     } else {
@@ -637,6 +643,17 @@ const server = http.createServer(async (req, res) => {
       };
       q.push(item); saveQueue(q);
       return json(res, 200, { item, count: q.length });
+    }
+
+    // 只生成消息、不投递：给不能 headless 接管的会话（DSH GUI）复制用
+    if (p === '/compose' && req.method === 'POST') {
+      const b = await readBody(req);
+      const tool = b.tool || 'codex';
+      if (!b.thread) return json(res, 400, { error: 'thread required' });
+      let mine = loadQueue().filter((x) => x.thread === b.thread && (x.tool || 'codex') === tool);
+      if (b.ids?.length) mine = mine.filter((x) => b.ids.includes(x.id));
+      if (!mine.length) return json(res, 400, { error: '这个会话的队列是空的' });
+      return json(res, 200, { ok: true, count: mine.length, message: composeMessage(mine) });
     }
 
     if (p === '/queue' && req.method === 'GET') {

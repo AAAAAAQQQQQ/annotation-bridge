@@ -416,6 +416,9 @@ def gui(s, show_window=True):
             self._auto_at = time.time()
             self._starting = True
             try:
+                # 二次确认：health 偶尔一次超时不算死，否则会重复拉起（EADDRINUSE）
+                if health(self.settings, timeout=2.5):
+                    return
                 alog("服务不在，自动拉起")
                 start_bridge(self.settings)
             finally:

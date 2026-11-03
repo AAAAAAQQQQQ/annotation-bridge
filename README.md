@@ -49,7 +49,9 @@ gpt-6-luna      default=medium  支持=low,medium,high,xhigh,max
 > **DSH 的硬限制**：`dsh --profile headless --session-id` 只能接管**没有 agent preset** 的会话。
 > 网页 / 桌面里建的会话都会记录 preset（`standard`、`cordis` 等），一次性 Runner 会直接拒绝
 > （`runs under agent preset ... which the one-shot runner does not compose`）。
-> 所以面板里这类会话会标 **「只读」**：能读历史，不能投递。要投递就用 Codex，或者用 headless 新建的会话。
+> 所以面板里这类会话会标 **「只读」**：能读历史，不能投递。
+> 选中它时底部按钮会变成 **「复制 N 条」**——点一下把完整标注消息复制到剪贴板，去 DSH 会话里 ⌘V 粘贴发送即可。
+> 想全自动就改用 Codex，或者用 headless 新建的会话。
 
 **给 DSH headless 配模型凭据**
 
