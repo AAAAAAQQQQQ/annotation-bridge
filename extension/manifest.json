@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "标注投递 · Codex",
+  "name": "信鸽 · 网页标注投递",
   "version": "0.2.0",
   "description": "在网页上标注元素并写评论，排队后一次性投递到指定的 Codex 会话，并显示它的回复。",
   "permissions": [

@@ -161,7 +161,7 @@ Chrome 从 **142** 起默认启用 **Local Network Access**：从公共来源访
 ./app/build.sh
 ```
 
-之后从 `~/Applications/标注投递.app`（或聚焦搜索）启动：菜单栏多一个图标，
+之后从 `~/Applications/信鸽.app`（或聚焦搜索「信鸽」）启动：有 Dock 图标 + 控制面板窗口，
 点「打开标注面板」就会弹出一个独立的面板窗口，不用去翻 Chrome 工具栏。
 
 ### 4. 用
@@ -169,7 +169,7 @@ Chrome 从 **142** 起默认启用 **Local Network Access**：从公共来源访
 两种打开方式：
 
 - 点 Chrome 工具栏的扩展图标 → 侧边栏弹出
-- 点菜单栏的 **标注投递** → **打开标注面板** → 独立窗口弹出
+- 点菜单栏的 **信鸽** → **打开标注面板** → 独立窗口弹出
 
 > 装完原生宿主或改了 `background.js`，记得重启 Chrome / 在 `chrome://extensions` 点一次刷新。
 
@@ -380,17 +380,17 @@ launchctl bootout gui/$(id -u)/com.gjr.annotation-bridge
 **图片怎么送到模型**：走「续跑」模式时，bridge 会把这些 PNG 用 `codex exec resume ... -i <png>` 传过去，
 模型是**真的看到图**，不是读路径。排队模式没有图片通道，只会带上文件路径——面板会提示这一点。
 
-## 桌面应用：标注投递.app
+## 桌面应用：信鸽.app
 
 ```bash
 cd ~/Project/annotation-bridge && ./app/build.sh
 ```
 
-装到 `~/Applications/标注投递.app`。不需要 Xcode，用系统里已有的 Python + PyObjC。
+装到 `~/Applications/信鸽.app`。不需要 Xcode，用系统里已有的 Python + PyObjC。
 
 启动后是一个**普通 App**（Dock 有图标）+ 一个控制面板窗口，同时也会挂一个菜单栏图标。
 菜单栏图标**不是必须的**：如果你的菜单栏已经被微信/钉钉/飞书等占满，系统会把新图标挤到屏幕外，
-这时用 Dock 图标（或 Spotlight 搜「标注投递」）打开控制面板就行，功能完全一样。
+这时用 Dock 图标（或 Spotlight 搜「信鸽」）打开控制面板就行，功能完全一样。
 
 控制面板里有：
 
@@ -407,7 +407,7 @@ Chrome 不允许从外部直接打开 `chrome-extension://` 页面（`open`、`-
 命令行同样可用（脚本/自动化友好）：
 
 ```bash
-APP="$HOME/Applications/标注投递.app/Contents/MacOS/AnnotationBridge"
+APP="$HOME/Applications/信鸽.app/Contents/MacOS/AnnotationBridge"
 "$APP" --status        # {"ok":true,"extension":true,"pid":...,"version":"0.2.0"}
 "$APP" --start         # 起服务（已在跑就什么都不做）
 "$APP" --stop          # 停服务
@@ -419,7 +419,7 @@ APP="$HOME/Applications/标注投递.app/Contents/MacOS/AnnotationBridge"
 配置可选，换端口/换项目就能复用这个壳：`~/Library/Application Support/AnnotationBridge/config.json`
 
 ```json
-{"name":"标注投递","port":47391,"projectDir":"~/Project/annotation-bridge","entry":"bridge.mjs"}
+{"name":"信鸽","port":47391,"projectDir":"~/Project/annotation-bridge","entry":"bridge.mjs"}
 ```
 
 服务日志：`~/Library/Logs/annotation-bridge.log`；app 自身日志：`~/Library/Logs/annotation-bridge-app.log`。

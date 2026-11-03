@@ -47,7 +47,7 @@ def expand(p):
 
 class Settings:
     def __init__(self):
-        self.name = "标注投递"
+        self.name = "信鸽"
         self.port = 47391
         self.project_dir = expand("~/Project/annotation-bridge")
         self.entry = "bridge.mjs"
@@ -207,7 +207,7 @@ def cli(flag, s):
 def status_symbol():
     """菜单栏主图标：SF Symbol，template 模式，明暗模式都自适应。"""
     from AppKit import NSImage
-    img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("text.bubble", "标注投递")
+    img = NSImage.imageWithSystemSymbolName_accessibilityDescription_("bird.fill", "信鸽")
     if img is not None:
         img.setTemplate_(True)
     return img
@@ -303,7 +303,7 @@ def gui(s, show_window=True):
                 NSMakeRect(0, 0, 380, 356),
                 NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable,
                 NSBackingStoreBuffered, False)
-            w.setTitle_("标注投递")
+            w.setTitle_("信鸽")
             w.setReleasedWhenClosed_(False)
             w.center()
             cv = w.contentView()
@@ -332,7 +332,7 @@ def gui(s, show_window=True):
                 cv.addSubview_(b)
                 return b
 
-            label("标注投递", NSMakeRect(20, 308, 200, 24), size=17, bold=True)
+            label(self.settings.name, NSMakeRect(20, 308, 200, 24), size=17, bold=True)
             self.win_status = label("● 已停止", NSMakeRect(20, 280, 340, 20), size=13, bold=True)
             self.win_meta = label("端口 %d" % self.settings.port, NSMakeRect(20, 260, 340, 18), size=11,
                                   color=NSColor.secondaryLabelColor())

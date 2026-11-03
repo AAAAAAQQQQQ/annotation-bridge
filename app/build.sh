@@ -3,7 +3,7 @@
 # 用 Homebrew python3 + PyObjC 跑菜单栏；不需要 Xcode、不需要编译。
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${APP_PATH:-$HOME/Applications/标注投递.app}"
+APP="${APP_PATH:-$HOME/Applications/信鸽.app}"
 
 # Finder 启动时 PATH 很干净，必须写死解释器绝对路径
 PY=""
@@ -35,11 +35,12 @@ esac
 SH
 chmod +x "$APP/Contents/MacOS/AnnotationBridge"
 
-# 图标：拿扩展已有的 png 生成 .icns
-ICONSET="$(mktemp -d)/AppIcon.iconset"
+# 图标：蓝底白鸽，脚本生成 1024 PNG，再转 .icns
+ICON_TMP="$(mktemp -d)"
+ICONSET="$ICON_TMP/AppIcon.iconset"
 mkdir -p "$ICONSET"
-SRC="$ROOT/extension/icons/icon128.png"
-[ -f "$SRC" ] || SRC="$ROOT/extension/icons/icon48.png"
+SRC="$ICON_TMP/icon.png"
+"$PY" "$ROOT/app/make_icon.py" "$SRC" --no-badge >/dev/null
 sips -z 16 16     "$SRC" --out "$ICONSET/icon_16x16.png"       >/dev/null
 sips -z 32 32     "$SRC" --out "$ICONSET/icon_16x16@2x.png"    >/dev/null
 sips -z 32 32     "$SRC" --out "$ICONSET/icon_32x32.png"       >/dev/null
@@ -51,7 +52,7 @@ sips -z 512 512   "$SRC" --out "$ICONSET/icon_256x256@2x.png"  >/dev/null
 sips -z 512 512   "$SRC" --out "$ICONSET/icon_512x512.png"     >/dev/null
 sips -z 1024 1024 "$SRC" --out "$ICONSET/icon_512x512@2x.png"  >/dev/null
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns" 2>/dev/null || true
-rm -rf "$(dirname "$ICONSET")"
+rm -rf "$ICON_TMP"
 
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 # 反复重新构建后 LaunchServices 可能还记着旧包，刷新一下，否则 open 会“没反应”

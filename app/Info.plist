@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>标注投递</string>
-  <key>CFBundleDisplayName</key><string>标注投递</string>
+  <key>CFBundleName</key><string>信鸽</string>
+  <key>CFBundleDisplayName</key><string>信鸽</string>
   <key>CFBundleIdentifier</key><string>com.gjr.annotation-bridge.gui</string>
   <key>CFBundleExecutable</key><string>AnnotationBridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
