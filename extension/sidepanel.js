@@ -18,7 +18,7 @@ const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<
 const meta = () => tools.find((t) => t.id === tool) || {};
 
 class ApiError extends Error {
-  constructor(msg, code) { super(msg); this.code = code; }
+  constructor(msg, code, data = null, status = 0) { super(msg); this.code = code; this.data = data; this.status = status; }
 }
 
 /** 把技术错误翻译成人话 */
@@ -30,6 +30,8 @@ function friendly(e) {
   if (/session not found/i.test(m)) return '这个会话找不到了 · 可能已被归档或删除';
   if (/timeout|ETIMEDOUT/i.test(m)) return '目标程序响应超时 · 它可能正在跑别的任务';
   if (/HTTP 5\d\d/.test(m)) return '目标程序报错了 · 点“展开全部”看细节';
+  if (/MISSING_CREDENTIAL|no API key/i.test(m)) return 'DSH 的 headless 通道没有模型凭据 · 需要给 headless profile 配 DEEPSEEK_API_KEY';
+  if (/ACCOUNT_SIGN_IN_REQUIRED/i.test(m)) return 'DSH 的 headless 通道没登录账号 · 需要单独给它配凭据';
   return m.length > 120 ? m.slice(0, 120) + '…' : m;
 }
 
@@ -96,7 +98,7 @@ async function api(path, opts = {}) {
   try {
     const r = await nativeCall(path, method, body);
     if (r) {
-      if (r.status === 0 || r.status >= 400) throw new ApiError(r.data?.error || `HTTP ${r.status}`, r.status === 502 ? 'UPSTREAM' : 'HTTP');
+      if (r.status === 0 || r.status >= 400) throw new ApiError(r.data?.error || `HTTP ${r.status}`, r.status === 502 ? 'UPSTREAM' : 'HTTP', r.data, r.status);
       setOffline(false);
       return r.data;
     }
@@ -111,7 +113,7 @@ async function api(path, opts = {}) {
     throw new ApiError('连不上本地服务', 'OFFLINE');
   }
   let data = null; try { data = await res.json(); } catch {}
-  if (!res.ok) throw new ApiError(data?.error || `HTTP ${res.status}`, res.status === 502 ? 'UPSTREAM' : 'HTTP');
+  if (!res.ok) throw new ApiError(data?.error || `HTTP ${res.status}`, res.status === 502 ? 'UPSTREAM' : 'HTTP', data, res.status);
   setOffline(false);
   return data;
 }
@@ -164,7 +166,7 @@ function renderList() {
   if (!list.length) { box.innerHTML = `<div class="pop-empty">${sessions.length ? '没有匹配' : '还没有会话'}</div>`; return; }
   box.innerHTML = list.map((s) => `
     <div class="pop-item ${selected?.id === s.id ? 'active' : ''}" data-id="${s.id}">
-      <b>${esc(s.title || String(s.id).slice(0, 8))}${qSummary[`${tool}|${s.id}`] ? `<span class="badge">${qSummary[`${tool}|${s.id}`]}</span>` : ''}</b>
+      <b>${esc(s.title || String(s.id).slice(0, 8))}${qSummary[`${tool}|${s.id}`] ? `<span class="badge">${qSummary[`${tool}|${s.id}`]}</span>` : ''}${tool === 'dsh' && s.preset ? '<span class="ro" title="GUI 里创建的会话（agent preset），headless 不能投递，只能读">只读</span>' : ''}</b>
       <small>${esc(s.project || '')} · ${String(s.id).slice(0, 8)} · ${ago(s.mtime)}</small>
     </div>`).join('');
   box.querySelectorAll('.pop-item').forEach((el) => el.addEventListener('click', () => {
@@ -177,6 +179,9 @@ function select(s) {
   selected = s;
   chrome.storage.local.set({ [K_THREAD]: { ...s, tool }, [K_CWD]: s.cwd || '' });
   updateSelectedUI(); renderList();
+  if (tool === 'dsh' && s.preset) {
+    hint('sendHint', `这个 DSH 会话是 GUI 创建的（预设 ${s.preset}），headless 不能投递 · 可以改用 Codex，或新建会话`, 'err');
+  }
   switchTab('feedback');
   $('messages').innerHTML = '<div class="empty">发送后这里会显示回复</div>';
   loadQueue();
@@ -743,7 +748,13 @@ async function sendAll() {
     await loadQueue(); await refreshSummary();
     if (d.replyText) { appendMessages([{ role: 'assistant', text: d.replyText, tools: [] }]); hint('sendHint', '已返回结果', 'ok'); }
     else pollReply(startedAt);
-  } catch (e) { hint('sendHint', '发送失败：' + friendly(e), 'err'); }
+  } catch (e) {
+    if (e?.data?.reason === 'preset') {
+      hint('sendHint', `这个 DSH 会话是 GUI 创建的（预设 ${e.data.preset}），headless 不能接管 · 换 Codex，或新建会话`, 'err');
+    } else {
+      hint('sendHint', '发送失败：' + friendly(e), 'err');
+    }
+  }
   finally { $('btnSend').disabled = false; }
 }
 

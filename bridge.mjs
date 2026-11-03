@@ -213,9 +213,13 @@ const dsh = {
   },
 
   meta(f) {
-    let title = '', cwd = '';
+    let title = '', cwd = '', preset = '';
     for (const d of parseLines(this.raw(f.file))) {
-      if (d.type === 'session' && d.cwd) cwd = d.cwd;
+      if (d.type === 'session') {
+        if (d.cwd) cwd = d.cwd;
+        if (d.agentPreset) preset = d.agentPreset;
+      }
+      if (d.type === 'agent-preset/selected' && d.data?.agentPreset) preset = d.data.agentPreset;
       if (!title && d.type === 'agent/inbox/spliced') {
         for (const it of d.data?.inserted || []) {
           if (it.role !== 'user') continue;
@@ -226,7 +230,7 @@ const dsh = {
       if (title && cwd) break;
     }
     const proj = cwd ? path.basename(cwd) : f.root.replace(/^--|--$/g, '').split('-').slice(-2).join('/');
-    return { tool: 'dsh', id: f.id, cwd, project: proj || '(unknown)', title: title || `(${fmt(f.mtime)})`, mtime: f.mtime, size: f.size, file: f.file };
+    return { tool: 'dsh', id: f.id, cwd, project: proj || '(unknown)', title: title || `(${fmt(f.mtime)})`, mtime: f.mtime, size: f.size, file: f.file, preset };
   },
 
   sessions(limit) { return this.files().slice(0, limit).map((f) => this.meta(f)); },
@@ -255,12 +259,28 @@ const dsh = {
 
   async createSession({ cwd, message }) {
     const env = { ...process.env }; delete env.all_proxy; delete env.ALL_PROXY;
-    const r = await execFileP(BIN.dsh, ['--profile', 'headless', message],
+    const r = await execFileP(BIN.dsh, ['--profile', 'headless', '--json', message],
       { timeout: 15 * 60 * 1000, maxBuffer: 64 * 1024 * 1024, env, cwd: cwd || process.cwd() });
-    return { threadId: '', replyText: (r.stdout || '').trim(), model: 'profile 默认' };
+    let threadId = '', text = '';
+    for (const line of (r.stdout || '').split('\n')) {
+      if (!line.trim()) continue;
+      let d; try { d = JSON.parse(line); } catch { continue; }
+      if (d.type === 'session' && d.sessionId) threadId = d.sessionId;
+      if (d.type === 'final' && typeof d.text === 'string') text = d.text;
+    }
+    return { threadId, replyText: text || (r.stdout || '').trim(), model: 'profile 默认' };
   },
 
-  async send({ thread, message }) {
+  async send({ thread, message, session }) {
+    // DSH 的一次性 runner 只能接管「没有 agent preset」的会话。
+    // 网页/桌面里建的会话都带 preset（standard/cordis/...），headless 会直接拒绝。
+    if (session?.preset) {
+      const err = new Error(`这个 DSH 会话是在 GUI 里创建的（agent preset「${session.preset}」），headless 一次性 Runner 不能接管。\n` +
+        `可以改用 Codex 投递，或者在 DSH 里新建一个会话再标注。`);
+      err.code = 'DSH_PRESET';
+      err.preset = session.preset;
+      throw err;
+    }
     const env = { ...process.env };
     delete env.all_proxy; delete env.ALL_PROXY;
     const r = await execFileP(BIN.dsh, ['--profile', 'headless', '--session-id', thread, message],
@@ -689,7 +709,12 @@ const server = http.createServer(async (req, res) => {
         saveQueue(q.filter((x) => !mine.some((m) => m.id === x.id)));
         return json(res, 200, { ok: true, tool, count: mine.length, startedAt, message, ...r });
       } catch (e) {
-        return json(res, 502, { ok: false, tool, count: mine.length, startedAt, message, error: String(e?.stderr || e?.message || e).slice(0, 1200) });
+        const isPreset = e?.code === 'DSH_PRESET';
+        return json(res, isPreset ? 409 : 502, {
+          ok: false, tool, count: mine.length, startedAt, message,
+          error: String(e?.stderr || e?.message || e).slice(0, 1200),
+          ...(isPreset ? { reason: 'preset', preset: e.preset } : {}),
+        });
       }
     }
 

@@ -33,7 +33,7 @@
 | 工具 | 列会话 | 发消息 | 换模型 | 换推理强度 | 读调用链 |
 |---|---|---|---|---|---|
 | **Codex** | ✅ 去重后按最近使用 | ✅ `codex queue`（排队，注入正在跑的会话） | ⚠️ 仅「续跑」模式：`codex exec resume -m` | ⚠️ 仅「续跑」模式：`-c model_reasoning_effort=` | ✅ |
-| **DeepSeek Harness** | ✅ 解压 `session.v4.jsonl.zstd` | ✅ `dsh headless --session-id` | ❌ headless 没有 model 参数 | ❌ | ✅ |
+| **DeepSeek Harness** | ✅ 解压 `session.v4.jsonl.zstd` | ⚠️ 只能投递 headless 建的会话（见下） | ❌ headless 没有 model 参数 | ❌ | ✅ |
 | **Claude Code** | ✅ 读 `~/.claude/projects` | ⚠️ 需要 `claude` CLI（本机未安装，页面里显示为灰） | ✅ `--resume -p --model` | — | ✅ |
 
 模型列表和每个模型支持的强度**不是写死的**，启动时跑 `codex debug models` 拉官方目录：
@@ -45,6 +45,11 @@ gpt-6-luna      default=medium  支持=low,medium,high,xhigh,max
 ```
 
 面板里选了模型，强度下拉只列这个模型真支持的档位。
+
+> **DSH 的硬限制**：`dsh --profile headless --session-id` 只能接管**没有 agent preset** 的会话。
+> 网页 / 桌面里建的会话都会记录 preset（`standard`、`cordis` 等），一次性 Runner 会直接拒绝
+> （`runs under agent preset ... which the one-shot runner does not compose`）。
+> 所以面板里这类会话会标 **「只读」**：能读历史，不能投递。要投递就用 Codex，或者用 headless 新建的会话。
 
 **排队 ≠ 续跑**，这两个不是一回事：
 
