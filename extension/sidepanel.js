@@ -33,6 +33,7 @@ function friendly(e) {
   }
   if (/session not found/i.test(m)) return '这个会话找不到了 · 可能已被归档或删除';
   if (/timeout|ETIMEDOUT/i.test(m)) return '目标程序响应超时 · 它可能正在跑别的任务';
+  if (/fetch failed|ECONNREFUSED|ECONNRESET/i.test(m)) return '本地服务暂时不可用（可能刚重启）· 等一秒再点一次';
   if (/HTTP 5\d\d/.test(m)) return '目标程序报错了 · 点“展开全部”看细节';
   if (/MISSING_CREDENTIAL|no API key/i.test(m)) return 'DSH 的 headless 通道没有模型凭据 · 需要给 headless profile 配 DEEPSEEK_API_KEY';
   if (/ACCOUNT_SIGN_IN_REQUIRED/i.test(m)) return 'DSH 的 headless 通道没登录账号 · 需要单独给它配凭据';
@@ -100,14 +101,22 @@ async function api(path, opts = {}) {
   if (opts.body) { try { body = JSON.parse(opts.body); } catch {} }
 
   // 1) 原生消息（不经浏览器网络层，不受 LNA 限制）
-  try {
-    const r = await nativeCall(path, method, body);
+  // 宿主偶尔会被 Chrome 回收，599 表示"请求发出去了、回复没回来"：
+  // 对幂等操作自动重试一次（/queue 用 clientId 去重，不会加两条）。
+  const idempotent = method === 'GET' || opts.idempotent === true;
+  const tries = idempotent ? 2 : 1;
+  for (let i = 0; i < tries; i++) {
+    let r = null;
+    try { r = await nativeCall(path, method, body); }
+    catch (e) { if (e instanceof ApiError) throw e; }
     if (r) {
+      if (r.status === 599 && i + 1 < tries) { await new Promise((res) => setTimeout(res, 300)); continue; }
       if (r.status === 0 || r.status >= 400) throw new ApiError(r.data?.error || `HTTP ${r.status}`, r.status === 502 ? 'UPSTREAM' : 'HTTP', r.data, r.status);
       setOffline(false);
       return r.data;
     }
-  } catch (e) { if (e instanceof ApiError) throw e; }
+    break;   // 没有原生通道 → 走 HTTP
+  }
 
   // 2) 回退 HTTP（开发/测试环境）
   let res;
@@ -644,7 +653,7 @@ function bindEditor() {
 
 /** 图片进附件（截图 / 贴图 / 拖进来 都走这里） */
 async function attachImage(dataUrl) {
-  const d = await api('/capture', { method: 'POST', body: JSON.stringify({ kind: 'screenshot', dataUrl }) });
+  const d = await api('/capture', { method: 'POST', idempotent: true, body: JSON.stringify({ kind: 'screenshot', dataUrl }) });
   captures.push({ kind: 'screenshot', id: d.id, path: d.path, url: d.url, dataUrl });
   renderCaps();
   hint('sendHint', '已添加图片，会随下一条标注一起发', 'ok');
@@ -711,11 +720,13 @@ async function loadQueue() {
       : '<div class="empty">队列是空的</div>';
     $('queue').querySelectorAll('[data-del]').forEach((el) => el.addEventListener('click', async (e) => {
       e.stopPropagation();
-      await api('/queue/remove', { method: 'POST', body: JSON.stringify({ id: el.dataset.del }) });
+      await api('/queue/remove', { method: 'POST', idempotent: true, body: JSON.stringify({ id: el.dataset.del }) });
       await loadQueue(); await refreshSummary();
     }));
   } catch (e) { hint('sendHint', '读队列失败：' + friendly(e), 'err'); }
 }
+
+const newClientId = () => 'c-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
 
 async function addToQueue() {
   if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
@@ -724,7 +735,8 @@ async function addToQueue() {
   if (!comment && !picked.length) return hint('sendHint', '写一句备注，或者先在页面上选个元素', 'err');
   try {
     if ($('capConsole').checked) await grabConsole(true);
-    await api('/queue', { method: 'POST', body: JSON.stringify({
+    await api('/queue', { method: 'POST', idempotent: true, body: JSON.stringify({
+      clientId: newClientId(),
       tool, thread: selected.id, comment,
       selector: picked[0]?.selector || '', text: picked[0]?.text || '', url: picked[0]?.url || (captures[0]?.url || ''),
       elements: picked.map((e) => ({ selector: e.selector, tag: e.tag, text: e.text })),
@@ -782,7 +794,7 @@ async function copyComposed() {
   if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
   if (!queueLen) return hint('sendHint', '队列是空的 · 先把标注加入队列', 'err');
   try {
-    const d = await api('/compose', { method: 'POST', body: JSON.stringify({ tool, thread: selected.id }) });
+    const d = await api('/compose', { method: 'POST', idempotent: true, body: JSON.stringify({ tool, thread: selected.id }) });
     const ok = await copyText(d.message);
     hint('sendHint', ok
       ? `已复制 ${d.count} 条标注 · 去 DSH 会话里 ⌘V 粘贴发送`
@@ -803,7 +815,7 @@ async function sendAll() {
   hint('sendHint', '正在提交…');
   try {
     lastSend = { mode, model: $('model').value, effort: $('effort').value, count: null };
-    const d = await withTimeout(api('/send', { method: 'POST', body: JSON.stringify({
+    const d = await withTimeout(api('/send', { method: 'POST', idempotent: true, body: JSON.stringify({
       tool, thread: selected.id, mode,
       model: $('model').value || undefined, effort: $('effort').value || undefined }) }), 20000, '提交超时');
     lastSend.count = d.count;
@@ -833,7 +845,7 @@ async function openPreview() {
   if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
   if (!queueLen) return hint('sendHint', '队列是空的 · 先把标注加入队列', 'err');
   try {
-    const d = await api('/compose', { method: 'POST', body: JSON.stringify({ tool, thread: selected.id }) });
+    const d = await api('/compose', { method: 'POST', idempotent: true, body: JSON.stringify({ tool, thread: selected.id }) });
     previewMessage = d.message || '';
     $('previewText').textContent = previewMessage;
     $('previewModal').classList.remove('hidden');
@@ -1136,7 +1148,7 @@ function bind() {
   $('btnLoadMsgs').addEventListener('click', loadRecent);
   $('btnClearQueue').addEventListener('click', async () => {
     if (!selected) return;
-    await api('/queue/clear', { method: 'POST', body: JSON.stringify({ thread: selected.id, tool }) });
+    await api('/queue/clear', { method: 'POST', idempotent: true, body: JSON.stringify({ thread: selected.id, tool }) });
     await loadQueue(); await refreshSummary();
   });
   $('mode').addEventListener('change', () => { syncOpts(); updateCapWarn(); });

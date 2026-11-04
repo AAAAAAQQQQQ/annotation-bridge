@@ -24,7 +24,13 @@ function send(obj) {
   const body = Buffer.from(JSON.stringify(obj), 'utf8');
   const len = Buffer.alloc(4);
   len.writeUInt32LE(body.length, 0);
-  process.stdout.write(Buffer.concat([len, body]));
+  try {
+    process.stdout.write(Buffer.concat([len, body]));
+  } catch (e) {
+    // Chrome 那边已经关掉管道（service worker 被回收），这条回复本来就送不到了
+    log('写回复失败: ' + (e?.code || e?.message));
+    process.exit(0);
+  }
 }
 
 async function healthy() {
@@ -69,16 +75,31 @@ async function forward({ method = 'GET', path: p, body }) {
   const t0 = Date.now();
   const ok = await ensureBridge();
   if (!ok) throw new Error('本地服务启动失败，请看 ~/Library/Logs/annotation-bridge-native.log');
-  const res = await fetch(`http://127.0.0.1:${PORT}${p}`, {
-    method,
-    headers: { 'content-type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15 * 60 * 1000),
-  });
-  const text = await res.text();
-  let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
-  log(`${method} ${p} → ${res.status} (${Date.now() - t0}ms)`);
-  return { status: res.status, data };
+
+  // bridge 正在重启时 fetch 会立刻 ECONNREFUSED（请求肯定没被处理），等一下重试两次。
+  // 其它错误不重试，避免把 POST /send 这类请求重复投递。
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}${p}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(15 * 60 * 1000),
+      });
+      const text = await res.text();
+      let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+      log(`${method} ${p} → ${res.status} (${Date.now() - t0}ms)`);
+      return { status: res.status, data };
+    } catch (e) {
+      lastErr = e;
+      const code = e?.cause?.code || '';
+      if (code !== 'ECONNREFUSED' && code !== 'ECONNRESET') break;
+      await new Promise((r) => setTimeout(r, 350));
+    }
+  }
+  log(`forward 失败: ${lastErr?.cause?.code || lastErr?.message || lastErr}`);
+  throw new Error(`连不上本地服务：${lastErr?.cause?.code || lastErr?.message || 'unknown'}`);
 }
 
 log(`host 启动 pid=${process.pid} node=${NODE}`);

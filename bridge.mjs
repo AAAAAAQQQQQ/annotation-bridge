@@ -219,7 +219,10 @@ const dsh = {
     try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
   },
 
+  _metaCache: new Map(),
   meta(f) {
+    const cached = this._metaCache.get(f.file);
+    if (cached && cached.mtime === f.mtime) return cached.value;
     let title = '', cwd = '', preset = '';
     for (const d of parseLines(this.raw(f.file))) {
       if (d.type === 'session') {
@@ -237,7 +240,9 @@ const dsh = {
       if (title && cwd) break;
     }
     const proj = cwd ? path.basename(cwd) : f.root.replace(/^--|--$/g, '').split('-').slice(-2).join('/');
-    return { tool: 'dsh', id: f.id, cwd, project: proj || '(unknown)', title: title || `(${fmt(f.mtime)})`, mtime: f.mtime, size: f.size, file: f.file, preset };
+    const value = { tool: 'dsh', id: f.id, cwd, project: proj || '(unknown)', title: title || `(${fmt(f.mtime)})`, mtime: f.mtime, size: f.size, file: f.file, preset };
+    this._metaCache.set(f.file, { mtime: f.mtime, value });
+    return value;
   },
 
   sessions(limit) { return this.files().slice(0, limit).map((f) => this.meta(f)); },
@@ -396,25 +401,31 @@ function codexNames() {
 }
 
 // ── Codex 模型目录（动态，带每个模型支持的推理强度）──
-let modelCatalog = { at: 0, models: [] };
+// 注意：不能用 execFileSync —— codex 卡一下会把整个 bridge 的事件循环堵死，
+// 健康检查一超时，桌面 app 就会误以为服务挂了、再拉起一个（EADDRINUSE）。
+let modelCatalog = { at: 0, models: [], loading: null };
 function codexModels() {
-  if (Date.now() - modelCatalog.at < 10 * 60 * 1000 && modelCatalog.models.length) return modelCatalog.models;
-  try {
-    const out = execFileSync(BIN.codex, ['debug', 'models'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-    const raw = JSON.parse(out);
-    const models = (raw.models || [])
-      .filter((m) => (m.visibility || 'list') === 'list')
-      .map((m) => ({
-        id: m.slug,
-        label: m.display_name || m.slug,
-        defaultLevel: m.default_reasoning_level || '',
-        levels: (m.supported_reasoning_levels || []).map((l) => l.effort),
-      }));
-    modelCatalog = { at: Date.now(), models };
-  } catch {
-    modelCatalog = { at: Date.now(), models: [] };
-  }
-  return modelCatalog.models;
+  if (Date.now() - modelCatalog.at < 10 * 60 * 1000 && modelCatalog.models.length) return Promise.resolve(modelCatalog.models);
+  if (modelCatalog.loading) return modelCatalog.loading;
+  modelCatalog.loading = execFileP(BIN.codex, ['debug', 'models'], { timeout: 20000, maxBuffer: 16 * 1024 * 1024 })
+    .then((r) => {
+      const raw = JSON.parse(r.stdout || '{}');
+      const models = (raw.models || [])
+        .filter((m) => (m.visibility || 'list') === 'list')
+        .map((m) => ({
+          id: m.slug,
+          label: m.display_name || m.slug,
+          defaultLevel: m.default_reasoning_level || '',
+          levels: (m.supported_reasoning_levels || []).map((l) => l.effort),
+        }));
+      modelCatalog = { at: Date.now(), models, loading: null };
+      return models;
+    })
+    .catch(() => {
+      modelCatalog = { at: Date.now(), models: [], loading: null };
+      return [];
+    });
+  return modelCatalog.loading;
 }
 
 // ── 缓存与能力表 ──────────────────────────────────────
@@ -426,12 +437,13 @@ function sessionsCached(tool, limit = 60) {
   cache.set(tool, { at: Date.now(), list });
   return list.slice(0, limit);
 }
-function toolsInfo() {
+async function toolsInfo() {
+  const catalog = await codexModels();
   return Object.values(TOOLS).map((t) => {
     const bin = which(BIN[t.id]);
     return {
       id: t.id, label: t.label, available: !!bin, binary: bin || BIN[t.id],
-      models: t.id === 'codex' ? codexModels() : t.models.map((m) => ({ id: m, label: m, levels: [] })),
+      models: t.id === 'codex' ? catalog : t.models.map((m) => ({ id: m, label: m, levels: [] })),
       efforts: t.id === 'codex' ? ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] : [],
       sendModes: t.sendModes,
       note: t.id === 'dsh' ? 'headless 无 model 参数，模型由 profile 决定'
@@ -591,7 +603,7 @@ const server = http.createServer(async (req, res) => {
       setTimeout(() => process.exit(0), 120);
       return;
     }
-    if (p === '/tools') return json(res, 200, { tools: toolsInfo(), dryRun: DRY_RUN });
+    if (p === '/tools') return json(res, 200, { tools: await toolsInfo(), dryRun: DRY_RUN });
 
     if (p === '/sessions') {
       const tool = u.searchParams.get('tool') || 'codex';
@@ -700,8 +712,13 @@ const server = http.createServer(async (req, res) => {
       if (!b.thread) return json(res, 400, { error: 'thread required' });
       if (!b.comment?.trim()) return json(res, 400, { error: 'comment required' });
       const q = loadQueue();
+      // 客户端带了 clientId 就按它去重：宿主断开重试时不会加两条
+      if (b.clientId) {
+        const dup = q.find((x) => x.clientId === b.clientId);
+        if (dup) return json(res, 200, { item: dup, count: q.length, deduped: true });
+      }
       const item = {
-        id: uid(), tool: b.tool || 'codex', thread: b.thread, comment: String(b.comment).trim(),
+        id: uid(), clientId: b.clientId || '', tool: b.tool || 'codex', thread: b.thread, comment: String(b.comment).trim(),
         selector: b.selector || '', text: b.text || '', url: b.url || '',
         severity: b.severity || 'important', createdAt: Date.now(),
         captures: Array.isArray(b.captures) ? b.captures : [],
@@ -848,7 +865,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[annotation-bridge] http://127.0.0.1:${PORT}  dryRun=${DRY_RUN}`);
-  for (const t of toolsInfo()) console.log(`  ${t.available ? '✓' : '✗'} ${t.label}  ${t.binary}`);
+server.listen(PORT, '127.0.0.1', async () => {
+  console.log(`[annotation-bridge] ${new Date().toISOString()} http://127.0.0.1:${PORT}  dryRun=${DRY_RUN}`);
+  for (const t of await toolsInfo()) console.log(`  ${t.available ? '✓' : '✗'} ${t.label}  ${t.binary}`);
 });
