@@ -54,7 +54,10 @@
 
       <div class="divider"></div>
 
-      <div class="section-head"><span>队列 <b class="pill" id="queueCount">0</b></span><button class="link" id="btnClearQueue">清空</button></div>
+      <div class="section-head"><span>队列 <b class="pill" id="queueCount">0</b></span>
+        <span><button class="link" id="btnPreviewQueue">预览</button>
+        <button class="link" id="btnCopyQueue">复制</button>
+        <button class="link" id="btnClearQueue">清空</button></span></div>
       <div class="qlist" id="queue"></div>
 
       <div class="opts">
@@ -121,6 +124,18 @@
       <div class="row">
         <button class="secondary block" id="btnEdCancel">取消</button>
         <button class="primary block" id="btnEdSave">保存标注</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 预提交预览 -->
+  <div class="modal hidden" id="previewModal">
+    <div class="sheet">
+      <div class="sheet-head"><b>将要发送的内容</b><button class="link" id="btnPreviewClose">✕</button></div>
+      <pre class="preview-text" id="previewText"></pre>
+      <div class="row">
+        <button class="secondary block" id="btnPreviewCopy">复制</button>
+        <button class="primary block" id="btnPreviewSend">发送</button>
       </div>
     </div>
   </div>

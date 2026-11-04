@@ -205,6 +205,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .pick-row .x{flex:none;color:var(--faint);cursor:pointer;font-size:11px}
 .pick-row .x:hover{color:var(--red)}
 
+.preview-text{margin:0;max-height:58vh;overflow:auto;background:var(--panel);border-radius:10px;padding:10px 12px;
+  font:11.5px/1.6 ui-monospace,Menlo,monospace;color:var(--ink);white-space:pre-wrap;word-break:break-word}
 .ed-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ed-tool{background:var(--panel);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--muted)}
 .ed-tool.active{background:var(--accent-soft);color:var(--accent);font-weight:600}

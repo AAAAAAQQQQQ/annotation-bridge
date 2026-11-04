@@ -14,6 +14,7 @@ let tools = [], tool = 'codex', sessions = [], selected = null, picked = [], pol
 let pickingActive = false;   // 面板这边记一下拾取状态，Esc 才能随时退出
 let queueLen = 0;            // 当前会话队列条数（发送按钮上显示）
 let currentJob = null;       // 正在执行的异步发送任务
+let previewMessage = '';     // 预览里的完整消息
 let jobTimer = null;
 let pickTabId = null;        // 拾取发生在哪个标签页；切标签后别把消息发错地方
 
@@ -827,6 +828,18 @@ async function sendAll() {
   finally { $('btnSend').disabled = false; }
 }
 
+/** 预览将要发送的完整消息（不投递） */
+async function openPreview() {
+  if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
+  if (!queueLen) return hint('sendHint', '队列是空的 · 先把标注加入队列', 'err');
+  try {
+    const d = await api('/compose', { method: 'POST', body: JSON.stringify({ tool, thread: selected.id }) });
+    previewMessage = d.message || '';
+    $('previewText').textContent = previewMessage;
+    $('previewModal').classList.remove('hidden');
+  } catch (e) { hint('sendHint', '预览失败：' + friendly(e), 'err'); }
+}
+
 /** 轮询异步任务：显示进度，完成时把回复贴进来 */
 function startJobPoll() {
   stopJobPoll();
@@ -846,7 +859,11 @@ function startJobPoll() {
       currentJob = null;
       await loadQueue(); await refreshSummary();
       if (j.status === 'done') {
-        hint('sendHint', `完成 · 用时 ${sec}s${j.pendingCount ? ` · Codex 队列里还有 ${j.pendingCount} 条` : ''}`, 'ok');
+        if (j.mode === 'queue') {
+          hint('sendHint', `已预提交 ${j.count} 条 · Codex 队列里还有 ${j.pendingCount ?? '?'} 条，当前任务结束后自动发送`, 'ok');
+        } else {
+          hint('sendHint', `完成 · 用时 ${sec}s${j.pendingCount ? ` · Codex 队列里还有 ${j.pendingCount} 条` : ''}`, 'ok');
+        }
         if (j.replyText) appendMessages([{ role: 'assistant', text: j.replyText, tools: [] }]);
         else pollReply(j.startedAt || Date.now());
       } else if (j.reason === 'preset') {
@@ -1063,6 +1080,20 @@ function bind() {
   $('btnPick').addEventListener('click', startPick);
   $('btnShot').addEventListener('click', takeShot);
   $('btnPaste')?.addEventListener('click', pasteFromClipboard);
+  $('btnPreviewQueue')?.addEventListener('click', openPreview);
+  $('btnCopyQueue')?.addEventListener('click', copyComposed);
+  $('btnPreviewClose')?.addEventListener('click', () => $('previewModal').classList.add('hidden'));
+  $('btnPreviewCopy')?.addEventListener('click', async () => {
+    const ok = await copyText(previewMessage);
+    hint('sendHint', ok ? '已复制到剪贴板 · 去 Codex 里 ⌘V 即可' : '复制失败', ok ? 'ok' : 'err');
+  });
+  $('btnPreviewSend')?.addEventListener('click', () => {
+    $('previewModal').classList.add('hidden');
+    sendAll();
+  });
+  $('previewModal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'previewModal') $('previewModal').classList.add('hidden');
+  });
 
   // 面板有焦点时 Esc 也能退出拾取（页面收不到键盘事件）
   document.addEventListener('keydown', (e) => {

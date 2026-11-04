@@ -65,7 +65,7 @@ const fmt = (ms) => new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day
 const codex = {
   id: 'codex', label: 'Codex',
   models: ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-5.6-luna'],
-  sendModes: [{ id: 'resume', label: '立刻执行·续跑' }, { id: 'queue', label: '排队·等回合结束' }],
+  sendModes: [{ id: 'queue', label: '预提交·等当前任务结束' }, { id: 'resume', label: '立刻执行·续跑' }],
 
   files(limit = 600) {
     const out = [];
