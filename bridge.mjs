@@ -176,8 +176,9 @@ const codex = {
       });
       return { mode, model: model || '会话当前模型', effort: effort || '', replyText: (r.stdout || '').trim() };
     }
-    const r = await execFileP(BIN.codex, ['queue', '--thread', thread, '--message', message, '--resume'],
-      { timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
+    // 不带 --resume：那一步会尝试把会话拉起来，可能卡几十秒；纯排队更快也更诚实
+    const r = await execFileP(BIN.codex, ['queue', '--thread', thread, '--message', message],
+      { timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
     // Codex 的队列只在回合正常结束时消费；看一眼还有几条在等，别让用户以为已送达
     await new Promise((res) => setTimeout(res, 400));
     return {

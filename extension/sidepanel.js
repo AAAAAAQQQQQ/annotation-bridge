@@ -737,6 +737,13 @@ async function addToQueue() {
   } catch (e) { hint('sendHint', '入队失败：' + friendly(e), 'err'); }
 }
 
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(message)), ms)),
+  ]);
+}
+
 function isReadOnlySession() {
   return tool === 'dsh' && !!selected?.preset;
 }
@@ -789,9 +796,9 @@ async function sendAll() {
   const startedAt = Date.now();
   try {
     lastSend = { mode: $('mode').value, model: $('model').value, effort: $('effort').value, count: null };
-    const d = await api('/send', { method: 'POST', body: JSON.stringify({
+    const d = await withTimeout(api('/send', { method: 'POST', body: JSON.stringify({
       tool, thread: selected.id, mode: $('mode').value,
-      model: $('model').value || undefined, effort: $('effort').value || undefined }) });
+      model: $('model').value || undefined, effort: $('effort').value || undefined }) }), 90000, '发送超时（90 秒没回音）');
     lastSend.count = d.count;
     if (d.dryRun) hint('sendHint', `DRY_RUN：已生成 ${d.count} 条，未真正投递`, 'ok');
     else if (d.mode === 'queue') {
@@ -805,6 +812,8 @@ async function sendAll() {
   } catch (e) {
     if (e?.data?.reason === 'preset') {
       hint('sendHint', `这个 DSH 会话是 GUI 创建的（预设 ${e.data.preset}），headless 不能接管 · 换 Codex，或新建会话`, 'err');
+    } else if (/发送超时/.test(String(e?.message || e))) {
+      hint('sendHint', '发送超时 · 消息还在队列里；先看看 Codex 那边，再决定重试', 'err');
     } else {
       hint('sendHint', '发送失败：' + friendly(e), 'err');
     }

@@ -5,6 +5,20 @@ const HOST = 'com.gjr.annotation_bridge';
 const REQUEST_TIMEOUT = 15 * 60 * 1000;   // /send 可能跑十几分钟，不能 20 秒就断
 let nativePort = null;
 let seq = 0;
+let pending = 0;
+let keepAlive = null;
+
+// MV3 的 service worker 空闲 30 秒会被回收，正在等的请求会永远等不到回复。
+// 有请求在飞时定期碰一下扩展 API，把空闲计时器顶住。
+function startKeepAlive() {
+  if (keepAlive) return;
+  keepAlive = setInterval(() => { try { chrome.runtime.getPlatformInfo(() => {}); } catch {} }, 20000);
+}
+function stopKeepAlive() {
+  if (pending > 0 || !keepAlive) return;
+  clearInterval(keepAlive);
+  keepAlive = null;
+}
 
 /** 打开（或聚焦）标注面板；独立小窗口，像桌面 app 一样 */
 async function openPanelWindow() {
@@ -71,6 +85,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     }
 
     const id = ++seq;
+    pending += 1;
+    startKeepAlive();
     let settled = false, sent = false;
     const cleanup = () => {
       clearTimeout(timer);
@@ -79,7 +95,14 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     };
     // native:false 只在「宿主根本没起来」时返回，让面板回退 HTTP；
     // 请求已经发出去之后断开则报错，避免 POST /send 被 HTTP 重放两次。
-    const done = (r) => { if (settled) return; settled = true; cleanup(); reply(r); };
+    const done = (r) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      pending = Math.max(0, pending - 1);
+      stopKeepAlive();
+      reply(r);
+    };
     const onMsg = (resp) => {
       if (!resp || resp.id !== id) return;
       done(resp);
