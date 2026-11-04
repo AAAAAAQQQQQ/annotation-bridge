@@ -65,6 +65,8 @@ headless profile 默认走 `deepseek-official`，需要 `DEEPSEEK_API_KEY`；DSH
 配好后 `dsh --profile headless --json "只回复 ok"` 能返回内容，面板里 headless 建的会话就可以直接投递了。
 （headless runner 还要求运行时目录和会话记录的目录一致，bridge 会自动用会话的 cwd。）
 
+**发送是异步的**：点「发送」后马上返回一个 job，面板轮询进度（`正在执行 · 已 12s`），完成后自动把回复贴进来；按钮不会再被挂住几分钟。同一个会话同时只允许一个 job，重复点会接到已有任务上而不是再起一个进程。
+
 **Codex 的排队只在「回合正常结束」时被消费**：会话正在跑任务时，消息会一直躺在 Codex 自己的队列里；按 Esc 打断**不会**让它立刻发，得等下一次回合结束。想马上送达就用「立刻执行·续跑」（会另起一轮；会话正忙时两个进程会抢同一个会话，所以忙的时候才用排队）。
 
 **排队 ≠ 续跑**，这两个不是一回事：
@@ -222,7 +224,8 @@ bridge 就监听在 `127.0.0.1:47391`，不连外网。你可以直接拿它当 
 | POST | `/queue` | 入队 `{thread, comment, selector, text, url, severity}` |
 | GET | `/queue?thread=` | 查队列 |
 | POST | `/queue/clear` | 清空 |
-| POST | `/send` | 投递该会话的整个队列 |
+| POST | `/send` | 投递该会话的整个队列（默认**异步**：立刻返回 job，`{wait:true}` 才同步等结果） |
+| GET | `/job?id=` / `?thread=` | 查异步发送任务的进度/结果 |
 | GET | `/reply?thread=&since=` | 投递之后的新回复 |
 
 ```bash

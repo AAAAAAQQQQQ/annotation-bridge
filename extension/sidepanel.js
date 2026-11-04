@@ -13,6 +13,8 @@ let captures = [];   // 待随下一条标注一起发送的截图/控制台
 let tools = [], tool = 'codex', sessions = [], selected = null, picked = [], pollTimer = null;
 let pickingActive = false;   // 面板这边记一下拾取状态，Esc 才能随时退出
 let queueLen = 0;            // 当前会话队列条数（发送按钮上显示）
+let currentJob = null;       // 正在执行的异步发送任务
+let jobTimer = null;
 let pickTabId = null;        // 拾取发生在哪个标签页；切标签后别把消息发错地方
 
 const esc = (s = '') => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -791,37 +793,90 @@ async function copyComposed() {
 async function sendAll() {
   if (isReadOnlySession()) return copyComposed();
   if (!selected) return hint('sendHint', '先选一个目标会话', 'err');
+  if (currentJob && currentJob.thread === selected.id) {
+    const sec = Math.round((Date.now() - currentJob.startedAt) / 1000);
+    return hint('sendHint', `这个会话上一条还在执行（已 ${sec}s），等它结束再发`, 'err');
+  }
+  const mode = $('mode').value;
   $('btnSend').disabled = true;
-  hint('sendHint', '发送中…');
-  const startedAt = Date.now();
+  hint('sendHint', '正在提交…');
   try {
-    lastSend = { mode: $('mode').value, model: $('model').value, effort: $('effort').value, count: null };
-    const mode = $('mode').value;
-    // 排队应该秒回；续跑要等 agent 跑完一轮，可能好几分钟
-    const timeoutMs = mode === 'queue' ? 60000 : 14 * 60 * 1000;
+    lastSend = { mode, model: $('model').value, effort: $('effort').value, count: null };
     const d = await withTimeout(api('/send', { method: 'POST', body: JSON.stringify({
       tool, thread: selected.id, mode,
-      model: $('model').value || undefined, effort: $('effort').value || undefined }) }), timeoutMs, '发送超时');
+      model: $('model').value || undefined, effort: $('effort').value || undefined }) }), 20000, '提交超时');
     lastSend.count = d.count;
-    if (d.dryRun) hint('sendHint', `DRY_RUN：已生成 ${d.count} 条，未真正投递`, 'ok');
-    else if (d.mode === 'queue') {
-      hint('sendHint', d.pendingCount > 0
-        ? `已写入 Codex 队列 ${d.count} 条 · 还有 ${d.pendingCount} 条在等当前回合结束（Esc 打断也不会立刻发）`
-        : `已入队并已发送 ${d.count} 条`, 'ok');
-    } else hint('sendHint', `已投递 ${d.count} 条 · 续跑${d.effort ? ' · ' + d.effort : ''}`, 'ok');
-    await loadQueue(); await refreshSummary();
-    if (d.replyText) { appendMessages([{ role: 'assistant', text: d.replyText, tools: [] }]); hint('sendHint', '已返回结果', 'ok'); }
-    else pollReply(startedAt);
+    if (d.dryRun) { hint('sendHint', `DRY_RUN：已生成 ${d.count} 条，未真正投递`, 'ok'); return; }
+    if (d.job) {
+      currentJob = d.job;
+      startJobPoll();
+      hint('sendHint', `${d.job.mode === 'queue' ? '已入队' : '已提交'} · 正在执行…`);
+      await loadQueue();
+    }
   } catch (e) {
-    if (e?.data?.reason === 'preset') {
+    if (e?.data?.reason === 'busy' && e.data.job) {
+      currentJob = e.data.job;
+      startJobPoll();
+      hint('sendHint', '这个会话上一条还在执行 · 已接上它的进度');
+    } else if (e?.data?.reason === 'preset') {
       hint('sendHint', `这个 DSH 会话是 GUI 创建的（预设 ${e.data.preset}），headless 不能接管 · 换 Codex，或新建会话`, 'err');
-    } else if (/发送超时/.test(String(e?.message || e))) {
-      hint('sendHint', '发送超时 · 消息还在队列里；先看看 Codex 那边，再决定重试', 'err');
     } else {
       hint('sendHint', '发送失败：' + friendly(e), 'err');
     }
   }
   finally { $('btnSend').disabled = false; }
+}
+
+/** 轮询异步任务：显示进度，完成时把回复贴进来 */
+function startJobPoll() {
+  stopJobPoll();
+  const tick = async () => {
+    if (!currentJob) return stopJobPoll();
+    try {
+      const d = await api(`/job?id=${encodeURIComponent(currentJob.id)}`);
+      const j = d.job;
+      if (!j) return;
+      currentJob = j;
+      const sec = Math.round((Date.now() - j.startedAt) / 1000);
+      if (j.status === 'running') {
+        hint('sendHint', `${j.mode === 'queue' ? '已入队 · 等当前回合结束' : '正在执行'} · 已 ${sec}s`);
+        return;
+      }
+      stopJobPoll();
+      currentJob = null;
+      await loadQueue(); await refreshSummary();
+      if (j.status === 'done') {
+        hint('sendHint', `完成 · 用时 ${sec}s${j.pendingCount ? ` · Codex 队列里还有 ${j.pendingCount} 条` : ''}`, 'ok');
+        if (j.replyText) appendMessages([{ role: 'assistant', text: j.replyText, tools: [] }]);
+        else pollReply(j.startedAt || Date.now());
+      } else if (j.reason === 'preset') {
+        hint('sendHint', `这个 DSH 会话是 GUI 创建的（预设 ${j.preset}），headless 不能接管 · 换 Codex，或新建会话`, 'err');
+      } else {
+        hint('sendHint', '发送失败：' + friendly(new Error(j.error || '未知错误')), 'err');
+      }
+    } catch { /* 网络抖动就下一拍再试 */ }
+  };
+  tick();
+  jobTimer = setInterval(tick, 1500);
+}
+
+function stopJobPoll() {
+  if (jobTimer) clearInterval(jobTimer);
+  jobTimer = null;
+}
+
+/** 面板重开/切会话：把这个会话正在跑的任务接回来 */
+async function resumeJobFor(thread) {
+  if (!thread) return;
+  try {
+    const d = await api(`/job?thread=${encodeURIComponent(thread)}&tool=${tool}`);
+    if (d.job && d.job.status === 'running') {
+      currentJob = d.job;
+      startJobPoll();
+      const sec = Math.round((Date.now() - d.job.startedAt) / 1000);
+      hint('sendHint', `这个会话有一条正在执行 · 已 ${sec}s`);
+    }
+  } catch {}
 }
 
 // ── 消息 ──

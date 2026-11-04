@@ -493,9 +493,52 @@ function composeMessage(items) {
   return out.join('\n');
 }
 
-// ── 发送互斥 ──────────────────────────────────────────
-// 同一个会话同时跑两个 exec resume 会互相抢线程锁，直接卡死。
+// ── 异步发送任务 ──────────────────────────────────────
+// 发送可能跑几分钟（exec resume），不能把 HTTP 请求和面板按钮一起挂住：
+// POST /send 立刻返回 job，面板轮询 GET /job 拿进度和结果。
+const jobs = new Map();
+let jobSeq = 0;
 const sendingThreads = new Set();
+
+function publicJob(j) {
+  return {
+    id: j.id, tool: j.tool, thread: j.thread, mode: j.mode, status: j.status,
+    startedAt: j.startedAt, finishedAt: j.finishedAt, count: j.count,
+    replyText: j.replyText || '', error: j.error || '',
+    pendingCount: j.pendingCount, reason: j.reason, preset: j.preset,
+  };
+}
+function createJob({ tool, thread, mode, count, startedAt, message }) {
+  const id = `job-${++jobSeq}-${Date.now().toString(36)}`;
+  const job = { id, tool, thread, mode, count, startedAt, status: 'running', message };
+  jobs.set(id, job);
+  return job;
+}
+function runJob(job, ctx) {
+  sendingThreads.add(ctx.lockKey);
+  job.done = (async () => {
+    try {
+      const r = await ctx.T.send({
+        thread: ctx.thread, mode: ctx.mode, model: ctx.model,
+        effort: ctx.effort, message: ctx.message, session: ctx.session, images: ctx.images,
+      });
+      saveQueue(loadQueue().filter((x) => !ctx.mine.some((m) => m.id === x.id)));
+      job.status = 'done';
+      job.finishedAt = Date.now();
+      job.result = r;
+      job.replyText = r.replyText || '';
+      job.pendingCount = r.pendingCount;
+    } catch (e) {
+      job.status = 'error';
+      job.finishedAt = Date.now();
+      job.error = String(e?.stderr || e?.message || e).slice(0, 1200);
+      if (e?.code === 'DSH_PRESET') { job.reason = 'preset'; job.preset = e.preset; }
+    } finally {
+      sendingThreads.delete(ctx.lockKey);
+      setTimeout(() => jobs.delete(job.id), 30 * 60 * 1000).unref?.();
+    }
+  })();
+}
 
 // ── 扩展控制通道 ──────────────────────────────────────
 // 桌面 app 点「打开面板」时往这里排一条命令；原生宿主每秒来取一次，
@@ -726,14 +769,15 @@ const server = http.createServer(async (req, res) => {
       const q = loadQueue();
       let mine = q.filter((x) => x.thread === b.thread && (x.tool || 'codex') === tool);
       if (b.ids?.length) mine = mine.filter((x) => b.ids.includes(x.id));
-      if (!mine.length) return json(res, 400, { error: '这个会话的队列是空的（队列按会话隔离）' });
-
-      const lockKey = `${tool}|${b.thread}`;
-      if (sendingThreads.has(lockKey)) {
-        return json(res, 409, { ok: false, error: '上一条还在发送中（同一个会话不要同时跑两个）', reason: 'busy' });
+      const running = [...jobs.values()].find((j) => j.thread === b.thread && j.tool === tool && j.status === 'running');
+      if (!mine.length) {
+        if (running) return json(res, 200, { ok: true, job: publicJob(running), count: running.count });
+        return json(res, 400, { error: '这个会话的队列是空的（队列按会话隔离）' });
       }
-      sendingThreads.add(lockKey);
-      try {
+      if (running) {
+        return json(res, 409, { ok: false, reason: 'busy', error: '上一条还在执行（同一个会话一次只能跑一个）', job: publicJob(running) });
+      }
+
       const session = sessionsCached(tool, 200).find((x) => x.id === b.thread) || {};
       const images = mine
         .flatMap((it) => it.captures || [])
@@ -752,21 +796,40 @@ const server = http.createServer(async (req, res) => {
           : ['queue', '--thread', '<thread>', '--message', '<text>'];
         return json(res, 200, { ok: true, dryRun: true, tool, mode: b.mode, model: b.model, effort: b.effort, count: mine.length, startedAt, message, images, willRun });
       }
-        try {
-          const r = await T.send({ thread: b.thread, mode: b.mode, model: b.model, effort: b.effort, message, session, images });
-        saveQueue(q.filter((x) => !mine.some((m) => m.id === x.id)));
-        return json(res, 200, { ok: true, tool, count: mine.length, startedAt, message, ...r });
-        } catch (e) {
-          const isPreset = e?.code === 'DSH_PRESET';
-          return json(res, isPreset ? 409 : 502, {
-            ok: false, tool, count: mine.length, startedAt, message,
-            error: String(e?.stderr || e?.message || e).slice(0, 1200),
-            ...(isPreset ? { reason: 'preset', preset: e.preset } : {}),
-          });
-        }
-      } finally {
-        sendingThreads.delete(lockKey);
+
+      const job = createJob({ tool, thread: b.thread, mode: b.mode || 'resume', count: mine.length, startedAt, message });
+      runJob(job, {
+        T, thread: b.thread, mode: b.mode, model: b.model, effort: b.effort,
+        message, session, images, mine, lockKey: `${tool}|${b.thread}`,
+      });
+
+      if (b.wait) {
+        await job.done;
+        if (job.status === 'done') return json(res, 200, { ok: true, tool, count: job.count, startedAt, message, ...job.result });
+        return json(res, job.reason === 'preset' ? 409 : 502, {
+          ok: false, tool, count: job.count, startedAt, message,
+          error: job.error,
+          ...(job.reason ? { reason: job.reason } : {}),
+          ...(job.preset ? { preset: job.preset } : {}),
+        });
       }
+      return json(res, 200, { ok: true, job: publicJob(job), count: job.count, message });
+    }
+
+    if (p === '/job' && req.method === 'GET') {
+      const id = u.searchParams.get('id');
+      const thread = u.searchParams.get('thread');
+      if (id) {
+        const j = jobs.get(id);
+        return j ? json(res, 200, { job: publicJob(j) }) : json(res, 404, { error: 'job not found' });
+      }
+      if (thread) {
+        const list = [...jobs.values()]
+          .filter((j) => j.thread === thread && (!u.searchParams.get('tool') || j.tool === u.searchParams.get('tool')))
+          .sort((a, b2) => b2.startedAt - a.startedAt);
+        return json(res, 200, { job: list[0] ? publicJob(list[0]) : null });
+      }
+      return json(res, 400, { error: 'id or thread required' });
     }
 
     if (p === '/reply') {
