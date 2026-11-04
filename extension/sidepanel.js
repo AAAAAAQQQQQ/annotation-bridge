@@ -89,10 +89,50 @@ async function reconnect() {
   if (ok) { setOffline(false); await loadSessions(); await loadQueue(); hint('sendHint', '已重新连接', 'ok'); }
 }
 
+// 面板自己持有一个常驻的原生端口：
+// service worker 休眠不会影响它，宿主跟着面板一起活着，请求也不会再被掐断。
+const NATIVE_HOST = 'com.gjr.annotation_bridge';
+let nativePort = null;
+let nativeSeq = 0;
+
+function getNativePort() {
+  if (nativePort) return nativePort;
+  const p = chrome.runtime.connectNative(NATIVE_HOST);
+  p.onDisconnect.addListener(() => { if (nativePort === p) nativePort = null; });
+  p.onMessage.addListener((m) => {
+    if (m?.type === 'COMMAND' && m.command === 'OPEN_PANEL') {
+      // 面板已经开着，聚焦当前窗口就行
+      chrome.windows.getCurrent().then((w) => chrome.windows.update(w.id, { focused: true })).catch(() => {});
+    }
+  });
+  nativePort = p;
+  return p;
+}
+
 async function nativeCall(path, method, body) {
-  const r = await chrome.runtime.sendMessage({ type: 'API', req: { method, path, body } });
-  if (!r || r.native === false) return null;      // host 没装 → 交给 HTTP
-  return r;
+  let port;
+  try { port = getNativePort(); } catch { return null; }   // host 没装 → 交给 HTTP
+  const id = ++nativeSeq;
+  return new Promise((resolve) => {
+    let settled = false, sent = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      try { port.onMessage.removeListener(onMsg); } catch {}
+      try { port.onDisconnect.removeListener(onDisc); } catch {}
+    };
+    const done = (r) => { if (settled) return; settled = true; cleanup(); resolve(r); };
+    const onMsg = (m) => { if (!m || m.id !== id) return; done(m); };
+    const onDisc = () => {
+      const err = chrome.runtime.lastError?.message || 'native host 断开';
+      if (nativePort === port) nativePort = null;
+      done(sent ? { native: true, status: 599, data: { error: `原生宿主中断：${err}` } } : { native: false, error: err });
+    };
+    const timer = setTimeout(() => done({ native: true, status: 599, data: { error: '原生宿主 15 分钟没有返回' } }), 15 * 60 * 1000);
+    port.onMessage.addListener(onMsg);
+    port.onDisconnect.addListener(onDisc);
+    try { port.postMessage({ id, method, path, body }); sent = true; }
+    catch (e) { nativePort = null; done({ native: false, error: String(e?.message || e) }); }
+  });
 }
 
 async function api(path, opts = {}) {
@@ -264,7 +304,16 @@ function syncOpts() {
 }
 
 // ── 拾取 ──
-const activeTab = () => new Promise((r) => chrome.runtime.sendMessage({ type: 'GET_ACTIVE_TAB' }, r));
+const activeTab = async () => {
+  try {
+    const tabs = await chrome.tabs.query({});
+    const pages = (tabs || []).filter((t) => t.url && /^https?:\/\//.test(t.url));
+    if (!pages.length) return null;
+    const active = pages.filter((t) => t.active).sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
+    const t = active[0] || pages.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+    return { tabId: t.id, url: t.url, title: t.title, windowId: t.windowId };
+  } catch { return null; }
+};
 async function ensureContent(tabId) {
   try { await chrome.tabs.sendMessage(tabId, { type: 'PING' }); return true; }
   catch {

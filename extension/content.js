@@ -21,6 +21,16 @@
     }
   });
 
+  // 扩展被重新加载后，旧内容脚本的 context 会失效（Extension context invalidated），
+  // 直接 sendMessage 会抛未捕获异常，这里统一兜住。
+  function safeSend(msg) {
+    try {
+      if (!chrome.runtime || !chrome.runtime.id) return;
+      const p = chrome.runtime.sendMessage(msg);
+      if (p && p.catch) p.catch(() => {});
+    } catch {}
+  }
+
   // 拾取
   let picking = false;
   let hoverEl = null;
@@ -175,19 +185,19 @@
     else { picked.push(info); }
     drawMarks();
     hideHover();
-    chrome.runtime.sendMessage({ type: 'ELEMENT_PICKED', payload: { multi: true, items: picked } }).catch(() => {});
+    safeSend({ type: 'ELEMENT_PICKED', payload: { multi: true, items: picked } });
   };
   const onKey = (e) => {
     if (!picking) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       stopPick();
-      chrome.runtime.sendMessage({ type: 'PICK_CANCELLED' }).catch(() => {});
+      safeSend({ type: 'PICK_CANCELLED' });
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const count = picked.length;
       stopPick();
-      chrome.runtime.sendMessage({ type: 'PICK_FINISHED', count }).catch(() => {});
+      safeSend({ type: 'PICK_FINISHED', count });
     }
   };
 
@@ -292,7 +302,7 @@
     } catch { return null; }
   }
 
-  chrome.runtime.onMessage.addListener((msg, _s, reply) => {
+  try { chrome.runtime.onMessage.addListener((msg, _s, reply) => {
     if (msg?.type === 'START_PICK') { startPick(); reply({ ok: true }); }
     if (msg?.type === 'STOP_PICK') { stopPick(); reply({ ok: true }); }
     if (msg?.type === 'PING') reply({ ok: true });
@@ -327,5 +337,5 @@
     }
     if (msg?.type === 'CLEAR_PICKS') { picked = []; clearMarks(); updateBanner(); reply({ ok: true }); }
     if (msg?.type === 'CLEAR_LOGS') { logs.length = 0; net.length = 0; reply({ ok: true }); }
-  });
+  }); } catch {}
 })();

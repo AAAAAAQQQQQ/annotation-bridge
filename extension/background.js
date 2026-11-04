@@ -2,23 +2,9 @@
 chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
 
 const HOST = 'com.gjr.annotation_bridge';
-const REQUEST_TIMEOUT = 15 * 60 * 1000;   // /send 可能跑十几分钟，不能 20 秒就断
+const REQUEST_TIMEOUT = 15 * 60 * 1000;   // /send 可能跑很久
 let nativePort = null;
 let seq = 0;
-let pending = 0;
-let keepAlive = null;
-
-// MV3 的 service worker 空闲 30 秒会被回收，正在等的请求会永远等不到回复。
-// 有请求在飞时定期碰一下扩展 API，把空闲计时器顶住。
-function startKeepAlive() {
-  if (keepAlive) return;
-  keepAlive = setInterval(() => { try { chrome.runtime.getPlatformInfo(() => {}); } catch {} }, 20000);
-}
-function stopKeepAlive() {
-  if (pending > 0 || !keepAlive) return;
-  clearInterval(keepAlive);
-  keepAlive = null;
-}
 
 /** 打开（或聚焦）标注面板；独立小窗口，像桌面 app 一样 */
 async function openPanelWindow() {
@@ -40,14 +26,17 @@ async function openPanelWindow() {
   }
 }
 
-/** 连上原生宿主；宿主没装/清单没生效时，port 会在下一拍断开。 */
+/**
+ * 后台这个端口主要给「面板没开时，桌面 app 能唤起面板」用。
+ * 面板自己会再开一个端口（sidepanel.js），所以面板开着时请求不依赖这里，
+ * service worker 被回收也不会影响面板里的操作。
+ */
 function getPort() {
   if (nativePort) return nativePort;
   const port = chrome.runtime.connectNative(HOST);
   port.onDisconnect.addListener(() => {
     if (nativePort === port) nativePort = null;
   });
-  // 宿主推来的命令（目前只有 OPEN_PANEL）
   port.onMessage.addListener((msg) => {
     if (msg?.type === 'COMMAND' && msg.command === 'OPEN_PANEL') openPanelWindow();
   });
@@ -55,16 +44,8 @@ function getPort() {
   return port;
 }
 
-// 一启动就连上宿主：桌面 app 随时能唤起面板，不用等用户先点扩展图标。
-// 宿主每秒来取一次命令，这条长连接同时让 service worker 保持唤醒。
-try { getPort(); } catch {}
-chrome.runtime.onStartup.addListener(() => { try { getPort(); } catch {} });
-chrome.runtime.onInstalled.addListener(() => { try { getPort(); } catch {} });
-
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg?.type === 'GET_ACTIVE_TAB') {
-    // 不能用 active:true 直接拿：面板本身如果是独立窗口/标签页，
-    // 它自己就是 active tab，会把“选元素”注入到自己身上。
     chrome.tabs.query({}, (tabs) => {
       const pages = (tabs || []).filter((t) => t.url && /^https?:\/\//.test(t.url));
       if (!pages.length) return reply(null);
@@ -75,56 +56,42 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     return true;
   }
 
+  // 兼容旧调用方；正常的面板请求走 sidepanel.js 自己的端口
   if (msg?.type === 'API') {
     let port;
     try { port = getPort(); }
     catch (e) {
       nativePort = null;
-      reply({ native: false, error: String(e?.message || e) });   // 没装 host → 面板回退到 HTTP
+      reply({ native: false, error: String(e?.message || e) });
       return true;
     }
-
     const id = ++seq;
-    pending += 1;
-    startKeepAlive();
     let settled = false, sent = false;
     const cleanup = () => {
       clearTimeout(timer);
       try { port.onMessage.removeListener(onMsg); } catch {}
       try { port.onDisconnect.removeListener(onDisc); } catch {}
     };
-    // native:false 只在「宿主根本没起来」时返回，让面板回退 HTTP；
-    // 请求已经发出去之后断开则报错，避免 POST /send 被 HTTP 重放两次。
-    const done = (r) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      pending = Math.max(0, pending - 1);
-      stopKeepAlive();
-      reply(r);
-    };
-    const onMsg = (resp) => {
-      if (!resp || resp.id !== id) return;
-      done(resp);
-    };
+    const done = (r) => { if (settled) return; settled = true; cleanup(); reply(r); };
+    const onMsg = (m) => { if (!m || m.id !== id) return; done(m); };
     const onDisc = () => {
       const err = chrome.runtime.lastError?.message || 'native host 断开';
       if (nativePort === port) nativePort = null;
-      // 宿主压根没装：可以直接回退 HTTP（请求没被处理过，不会重复投递）
-      const neverStarted = !sent || /not found|找不到|not installed/i.test(err);
-      done(neverStarted ? { native: false, error: err } : { native: true, status: 599, data: { error: `原生宿主中断：${err}` } });
+      done(sent ? { native: true, status: 599, data: { error: `原生宿主中断：${err}` } } : { native: false, error: err });
     };
     const timer = setTimeout(() => done({ native: true, status: 599, data: { error: '原生宿主 15 分钟没有返回' } }), REQUEST_TIMEOUT);
-
     port.onMessage.addListener(onMsg);
     port.onDisconnect.addListener(onDisc);
-    try {
-      port.postMessage({ id, ...msg.req });
-      sent = true;
-    } catch (e) {
-      nativePort = null;
-      done({ native: false, error: String(e?.message || e) });
-    }
+    try { port.postMessage({ id, ...msg.req }); sent = true; }
+    catch (e) { done({ native: false, error: String(e?.message || e) }); }
     return true;
   }
 });
+
+// service worker 会休眠，用 alarms 每 30 秒醒一次把端口接回来，
+// 这样桌面 app 点了「打开面板」最多 30 秒内也能把扩展叫起来。
+chrome.alarms.create('native-keepalive', { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'native-keepalive') { try { getPort(); } catch {} } });
+chrome.runtime.onStartup.addListener(() => { try { getPort(); } catch {} });
+chrome.runtime.onInstalled.addListener(() => { try { getPort(); } catch {} });
+try { getPort(); } catch {}
