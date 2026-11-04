@@ -570,10 +570,27 @@ const json = (res, code, obj) => {
   });
   res.end(JSON.stringify(obj));
 };
-const readBody = (req) => new Promise((resolve) => {
-  let b = ''; req.on('data', (c) => { b += c; if (b.length > 4e6) req.destroy(); });
-  req.on('end', () => { try { resolve(b ? JSON.parse(b) : {}); } catch { resolve({}); } });
-});
+// 大图（长截图）base64 很容易超几 MB，上限放宽到 64MB；
+// 超了也不能 destroy —— 那样客户端只会看到 EPIPE，要读完再回 413。
+function readBody(req, max = 64 * 1024 * 1024) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    let size = 0;
+    let tooBig = false;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > max) { tooBig = true; chunks.length = 0; return; }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (tooBig) return resolve({ __tooBig: true });
+      try {
+        const s = Buffer.concat(chunks).toString('utf8');
+        resolve(s ? JSON.parse(s) : {});
+      } catch { resolve({}); }
+    });
+  });
+}
 
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -666,6 +683,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/capture' && req.method === 'POST') {
       const b = await readBody(req);
+      if (b.__tooBig) return json(res, 413, { error: '图片太大了（超过 64MB）· 换个窗口尺寸再截，或先压缩' });
       const id = uid();
       const ts = Date.now();
       if (b.kind === 'screenshot' && b.dataUrl) {

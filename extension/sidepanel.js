@@ -34,6 +34,7 @@ function friendly(e) {
   if (/session not found/i.test(m)) return '这个会话找不到了 · 可能已被归档或删除';
   if (/timeout|ETIMEDOUT/i.test(m)) return '目标程序响应超时 · 它可能正在跑别的任务';
   if (/fetch failed|ECONNREFUSED|ECONNRESET/i.test(m)) return '本地服务暂时不可用（可能刚重启）· 等一秒再点一次';
+  if (/EPIPE/i.test(m)) return '图片太大，传输被中断 · 换小一点的窗口再截，或先压缩';
   if (/HTTP 5\d\d/.test(m)) return '目标程序报错了 · 点“展开全部”看细节';
   if (/MISSING_CREDENTIAL|no API key/i.test(m)) return 'DSH 的 headless 通道没有模型凭据 · 需要给 headless profile 配 DEEPSEEK_API_KEY';
   if (/ACCOUNT_SIGN_IN_REQUIRED/i.test(m)) return 'DSH 的 headless 通道没登录账号 · 需要单独给它配凭据';
@@ -706,10 +707,35 @@ function bindEditor() {
   });
 }
 
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = src;
+  });
+}
+
+/** 长截图 base64 可能有十几 MB，先压到 2.5MB 左右再传（JPEG 0.9 / 长边 2600） */
+async function shrinkDataUrl(dataUrl) {
+  if (!dataUrl || dataUrl.length <= 2_500_000) return dataUrl;
+  try {
+    const img = await loadImage(dataUrl);
+    const scale = Math.min(1, 2600 / Math.max(img.width, img.height));
+    if (scale === 1 && dataUrl.length <= 8_000_000) return dataUrl;
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.round(img.width * scale));
+    cv.height = Math.max(1, Math.round(img.height * scale));
+    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    return cv.toDataURL('image/jpeg', 0.9);
+  } catch { return dataUrl; }
+}
+
 /** 图片进附件（截图 / 贴图 / 拖进来 都走这里） */
 async function attachImage(dataUrl) {
-  const d = await api('/capture', { method: 'POST', idempotent: true, body: JSON.stringify({ kind: 'screenshot', dataUrl }) });
-  captures.push({ kind: 'screenshot', id: d.id, path: d.path, url: d.url, dataUrl });
+  const small = await shrinkDataUrl(dataUrl);
+  const d = await api('/capture', { method: 'POST', idempotent: true, body: JSON.stringify({ kind: 'screenshot', dataUrl: small }) });
+  captures.push({ kind: 'screenshot', id: d.id, path: d.path, url: d.url, dataUrl: small });
   renderCaps();
   hint('sendHint', '已添加图片，会随下一条标注一起发', 'ok');
 }
