@@ -32,7 +32,7 @@
 
 | 工具 | 列会话 | 发消息 | 换模型 | 换推理强度 | 读调用链 |
 |---|---|---|---|---|---|
-| **Codex** | ✅ 去重后按最近使用 | ✅ `codex queue`（排队，注入正在跑的会话） | ⚠️ 仅「续跑」模式：`codex exec resume -m` | ⚠️ 仅「续跑」模式：`-c model_reasoning_effort=` | ✅ |
+| **Codex** | ✅ 去重后按最近使用 | ✅ 「立刻执行」= `codex exec resume`；「排队」= `codex queue` | ✅ 续跑模式：`codex exec resume -m` | ✅ 续跑模式：`-c model_reasoning_effort=` | ✅ |
 | **DeepSeek Harness** | ✅ 解压 `session.v4.jsonl.zstd` | ⚠️ 只能投递 headless 建的会话（见下） | ❌ headless 没有 model 参数 | ❌ | ✅ |
 | **Claude Code** | ✅ 读 `~/.claude/projects` | ⚠️ 需要 `claude` CLI（本机未安装，页面里显示为灰） | ✅ `--resume -p --model` | — | ✅ |
 
@@ -64,6 +64,8 @@ headless profile 默认走 `deepseek-official`，需要 `DEEPSEEK_API_KEY`；DSH
 这个文件在仓库外，`.gitignore` 也兜底忽略了 `.env` / `.env.*` / `*.key`。
 配好后 `dsh --profile headless --json "只回复 ok"` 能返回内容，面板里 headless 建的会话就可以直接投递了。
 （headless runner 还要求运行时目录和会话记录的目录一致，bridge 会自动用会话的 cwd。）
+
+**Codex 的排队只在「回合正常结束」时被消费**：会话正在跑任务时，消息会一直躺在 Codex 自己的队列里；按 Esc 打断**不会**让它立刻发，得等下一次回合结束。想马上送达就用「立刻执行·续跑」（会另起一轮；会话正忙时两个进程会抢同一个会话，所以忙的时候才用排队）。
 
 **排队 ≠ 续跑**，这两个不是一回事：
 

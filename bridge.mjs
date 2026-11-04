@@ -65,7 +65,7 @@ const fmt = (ms) => new Date(ms).toLocaleString('zh-CN', { month: '2-digit', day
 const codex = {
   id: 'codex', label: 'Codex',
   models: ['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-5.6-luna'],
-  sendModes: [{ id: 'queue', label: '排队·不改模型' }, { id: 'resume', label: '续跑·换模型' }],
+  sendModes: [{ id: 'resume', label: '立刻执行·续跑' }, { id: 'queue', label: '排队·等回合结束' }],
 
   files(limit = 600) {
     const out = [];
@@ -178,7 +178,13 @@ const codex = {
     }
     const r = await execFileP(BIN.codex, ['queue', '--thread', thread, '--message', message, '--resume'],
       { timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
-    return { mode: 'queue', model: '会话当前模型', effort: '', stdout: (r.stdout || '').trim() };
+    // Codex 的队列只在回合正常结束时消费；看一眼还有几条在等，别让用户以为已送达
+    await new Promise((res) => setTimeout(res, 400));
+    return {
+      mode: 'queue', model: '会话当前模型', effort: '',
+      pendingCount: codexQueueCount(thread),
+      stdout: (r.stdout || '').trim(),
+    };
   },
 };
 
@@ -357,6 +363,18 @@ const claude = {
     return { mode: 'print', model: model || '会话当前模型', replyText: (r.stdout || '').trim() };
   },
 };
+
+/** Codex 队列里这个会话还有几条没被消费（读它的 sqlite，只为给个诚实的提示） */
+function codexQueueCount(thread) {
+  try {
+    const db = path.join(HOME, '.codex', 'queue_1.sqlite');
+    if (!exists(db)) return null;
+    const safe = String(thread).replace(/[^0-9a-fA-F-]/g, '');
+    const out = execFileSync('/usr/bin/sqlite3', [db, `select count(*) from queued_items where thread_id='${safe}';`],
+      { encoding: 'utf8', timeout: 2000 });
+    return Number(out.trim()) || 0;
+  } catch { return null; }
+}
 
 const TOOLS = { codex, claude, dsh };
 
