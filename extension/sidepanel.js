@@ -127,7 +127,9 @@ async function nativeCall(path, method, body) {
       if (nativePort === port) nativePort = null;
       done(sent ? { native: true, status: 599, data: { error: `原生宿主中断：${err}` } } : { native: false, error: err });
     };
-    const timer = setTimeout(() => done({ native: true, status: 599, data: { error: '原生宿主 15 分钟没有返回' } }), 15 * 60 * 1000);
+    // /send 可能要跑很久；其它请求 30 秒没回音就认为通道坏了，让上层重试/回退
+    const waitMs = path.startsWith('/send') ? 15 * 60 * 1000 : 30000;
+    const timer = setTimeout(() => done({ native: true, status: 599, data: { error: `原生宿主 ${Math.round(waitMs / 1000)} 秒没有返回` } }), waitMs);
     port.onMessage.addListener(onMsg);
     port.onDisconnect.addListener(onDisc);
     try { port.postMessage({ id, method, path, body }); sent = true; }
@@ -145,25 +147,29 @@ async function api(path, opts = {}) {
   // 对幂等操作自动重试一次（/queue 用 clientId 去重，不会加两条）。
   const idempotent = method === 'GET' || opts.idempotent === true;
   const tries = idempotent ? 2 : 1;
+  let nativeErr = null;
   for (let i = 0; i < tries; i++) {
     let r = null;
     try { r = await nativeCall(path, method, body); }
     catch (e) { if (e instanceof ApiError) throw e; }
-    if (r) {
-      if (r.status === 599 && i + 1 < tries) { await new Promise((res) => setTimeout(res, 300)); continue; }
-      if (r.status === 0 || r.status >= 400) throw new ApiError(r.data?.error || `HTTP ${r.status}`, r.status === 502 ? 'UPSTREAM' : 'HTTP', r.data, r.status);
-      setOffline(false);
-      return r.data;
+    if (!r) break;   // 没有原生通道 → 走 HTTP
+    if (r.status === 599) {
+      nativeErr = r;
+      if (i + 1 < tries) { await new Promise((res) => setTimeout(res, 300)); continue; }
+      break;         // 重试也没回音 → 退到 HTTP 再试一次
     }
-    break;   // 没有原生通道 → 走 HTTP
+    if (r.status === 0 || r.status >= 400) throw new ApiError(r.data?.error || `HTTP ${r.status}`, r.status === 502 ? 'UPSTREAM' : 'HTTP', r.data, r.status);
+    setOffline(false);
+    return r.data;
   }
 
-  // 2) 回退 HTTP（开发/测试环境）
+  // 2) 回退 HTTP（开发/测试环境，或者原生通道一时断了）
   let res;
   try {
     res = await fetch(bridge + path, { headers: { 'content-type': 'application/json' }, ...opts });
   } catch (e) {
     setOffline(true, String(e?.message || e));
+    if (nativeErr) throw new ApiError(nativeErr.data?.error || '原生宿主中断', 'HTTP', nativeErr.data, 599);
     throw new ApiError('连不上本地服务', 'OFFLINE');
   }
   let data = null; try { data = await res.json(); } catch {}
