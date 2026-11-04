@@ -493,6 +493,10 @@ function composeMessage(items) {
   return out.join('\n');
 }
 
+// ── 发送互斥 ──────────────────────────────────────────
+// 同一个会话同时跑两个 exec resume 会互相抢线程锁，直接卡死。
+const sendingThreads = new Set();
+
 // ── 扩展控制通道 ──────────────────────────────────────
 // 桌面 app 点「打开面板」时往这里排一条命令；原生宿主每秒来取一次，
 // 取到后用 stdout 推给扩展 service worker，由它开一个独立窗口。
@@ -724,6 +728,12 @@ const server = http.createServer(async (req, res) => {
       if (b.ids?.length) mine = mine.filter((x) => b.ids.includes(x.id));
       if (!mine.length) return json(res, 400, { error: '这个会话的队列是空的（队列按会话隔离）' });
 
+      const lockKey = `${tool}|${b.thread}`;
+      if (sendingThreads.has(lockKey)) {
+        return json(res, 409, { ok: false, error: '上一条还在发送中（同一个会话不要同时跑两个）', reason: 'busy' });
+      }
+      sendingThreads.add(lockKey);
+      try {
       const session = sessionsCached(tool, 200).find((x) => x.id === b.thread) || {};
       const images = mine
         .flatMap((it) => it.captures || [])
@@ -742,17 +752,20 @@ const server = http.createServer(async (req, res) => {
           : ['queue', '--thread', '<thread>', '--message', '<text>'];
         return json(res, 200, { ok: true, dryRun: true, tool, mode: b.mode, model: b.model, effort: b.effort, count: mine.length, startedAt, message, images, willRun });
       }
-      try {
-        const r = await T.send({ thread: b.thread, mode: b.mode, model: b.model, effort: b.effort, message, session, images });
+        try {
+          const r = await T.send({ thread: b.thread, mode: b.mode, model: b.model, effort: b.effort, message, session, images });
         saveQueue(q.filter((x) => !mine.some((m) => m.id === x.id)));
         return json(res, 200, { ok: true, tool, count: mine.length, startedAt, message, ...r });
-      } catch (e) {
-        const isPreset = e?.code === 'DSH_PRESET';
-        return json(res, isPreset ? 409 : 502, {
-          ok: false, tool, count: mine.length, startedAt, message,
-          error: String(e?.stderr || e?.message || e).slice(0, 1200),
-          ...(isPreset ? { reason: 'preset', preset: e.preset } : {}),
-        });
+        } catch (e) {
+          const isPreset = e?.code === 'DSH_PRESET';
+          return json(res, isPreset ? 409 : 502, {
+            ok: false, tool, count: mine.length, startedAt, message,
+            error: String(e?.stderr || e?.message || e).slice(0, 1200),
+            ...(isPreset ? { reason: 'preset', preset: e.preset } : {}),
+          });
+        }
+      } finally {
+        sendingThreads.delete(lockKey);
       }
     }
 
