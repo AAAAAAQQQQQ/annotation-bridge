@@ -796,9 +796,12 @@ async function sendAll() {
   const startedAt = Date.now();
   try {
     lastSend = { mode: $('mode').value, model: $('model').value, effort: $('effort').value, count: null };
+    const mode = $('mode').value;
+    // 排队应该秒回；续跑要等 agent 跑完一轮，可能好几分钟
+    const timeoutMs = mode === 'queue' ? 60000 : 14 * 60 * 1000;
     const d = await withTimeout(api('/send', { method: 'POST', body: JSON.stringify({
-      tool, thread: selected.id, mode: $('mode').value,
-      model: $('model').value || undefined, effort: $('effort').value || undefined }) }), 90000, '发送超时（90 秒没回音）');
+      tool, thread: selected.id, mode,
+      model: $('model').value || undefined, effort: $('effort').value || undefined }) }), timeoutMs, '发送超时');
     lastSend.count = d.count;
     if (d.dryRun) hint('sendHint', `DRY_RUN：已生成 ${d.count} 条，未真正投递`, 'ok');
     else if (d.mode === 'queue') {
