@@ -317,7 +317,10 @@ const claude = {
   files(limit = 300) {
     const out = [];
     let projs = []; try { projs = fs.readdirSync(DIRS.claude, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { return out; }
+    // 信使自己那个会话不列出来
+    const courierProj = COURIER_DIR.replace(/[^a-zA-Z0-9]/g, '-');
     for (const p of projs) {
+      if (p === courierProj) continue;
       const dir = path.join(DIRS.claude, p);
       let fs2 = []; try { fs2 = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')); } catch { continue; }
       for (const f of fs2) {
@@ -358,7 +361,9 @@ const claude = {
       if (firstUser && cwd) break;
     }
 
-    const title = (aiTitle || firstUser || lastPrompt || `(${fmt(f.mtime)})`).replace(/\s+/g, ' ').slice(0, 90);
+    const reg = claudeRegistry().get(f.id);
+    const title = ((reg && reg.name) || aiTitle || firstUser || lastPrompt || `(${fmt(f.mtime)})`)
+      .replace(/\s+/g, ' ').slice(0, 90);
     const value = { tool: 'claude', id: f.id, cwd, project: cwd ? path.basename(cwd) : f.dir, title, model, mtime: f.mtime, size: f.size, file: f.file };
     this._metaCache.set(f.file, { mtime: f.mtime, value });
     return value;
@@ -421,16 +426,8 @@ const claude = {
   },
   /** 找运行中会话在 Claude 注册表里的名字（SendMessage 要用这个名字） */
   liveName(thread) {
-    try {
-      for (const f of fs.readdirSync(CC_SESSIONS)) {
-        if (!f.endsWith('.json')) continue;
-        try {
-          const j = JSON.parse(fs.readFileSync(path.join(CC_SESSIONS, f), 'utf8'));
-          if (j.sessionId === thread && j.name) return j.name;
-        } catch {}
-      }
-    } catch {}
-    return null;
+    const reg = claudeRegistry().get(thread);
+    return (reg && reg.name) || null;
   },
   async send({ thread, mode, model, message, session }) {
     const cwd = session?.cwd && exists(session.cwd) ? session.cwd : process.cwd();
@@ -479,6 +476,25 @@ function codexQueueCount(thread) {
 }
 
 const TOOLS = { codex, claude, dsh };
+
+// ── Claude 运行中会话注册表（名字/状态在这里，比 ai-title 更接近 TUI 显示）──
+// ~/.claude/sessions/<pid>.json：{ sessionId, name, status, kind, ... }
+let ccRegCache = { at: 0, map: new Map() };
+function claudeRegistry() {
+  if (Date.now() - ccRegCache.at < 2000) return ccRegCache.map;
+  const map = new Map();
+  try {
+    for (const f of fs.readdirSync(CC_SESSIONS)) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const j = JSON.parse(fs.readFileSync(path.join(CC_SESSIONS, f), 'utf8'));
+        if (j.sessionId) map.set(j.sessionId, j);
+      } catch {}
+    }
+  } catch {}
+  ccRegCache = { at: Date.now(), map };
+  return map;
+}
 
 // ── Codex 会话名（~/.codex/session_index.jsonl: {id, thread_name, updated_at}）──
 const INDEX_FILE = path.join(HOME, '.codex', 'session_index.jsonl');
