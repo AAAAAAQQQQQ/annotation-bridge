@@ -29,6 +29,8 @@ const BIN = {
   dsh: process.env.DSH_BIN || '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh',
 };
 const CC_SESSIONS = path.join(HOME, '.claude', 'sessions');
+const COURIER_DIR = path.join(HOME, '.annotation-bridge', 'courier');
+const COURIER_STATE = path.join(HOME, '.annotation-bridge', 'courier.json');
 const DIRS = {
   codex: path.join(HOME, '.codex', 'sessions'),
   claude: path.join(HOME, '.claude', 'projects'),
@@ -386,6 +388,37 @@ const claude = {
     return { threadId, replyText: text, model: model || '默认' };
   },
 
+  /** 固定信使会话：只建一次，之后所有转发都复用它 */
+  async courier() {
+    let st = {};
+    try { st = JSON.parse(fs.readFileSync(COURIER_STATE, 'utf8')); } catch {}
+    if (st.id) return st.id;
+    fs.mkdirSync(COURIER_DIR, { recursive: true });
+    await execFileP(BIN.claude, ['-p', '你是信鸽的转发信使，只回复 ok。'], {
+      cwd: COURIER_DIR, timeout: 2 * 60 * 1000, maxBuffer: 8 * 1024 * 1024,
+    });
+    // 找刚创建的会话（Claude 的项目目录名会把 . 和 / 都换成 -，直接按内容匹配 cwd 更稳）
+    let id = '';
+    let newest = 0;
+    for (const d of fs.readdirSync(DIRS.claude)) {
+      const dir = path.join(DIRS.claude, d);
+      let files = [];
+      try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')); } catch { continue; }
+      for (const f of files) {
+        const fp = path.join(dir, f);
+        let st; try { st = fs.statSync(fp); } catch { continue; }
+        if (Date.now() - st.mtimeMs > 3 * 60 * 1000 || st.mtimeMs <= newest) continue;
+        let head = '';
+        try { head = fs.readFileSync(fp, 'utf8').slice(0, 16384); } catch { continue; }
+        if (!head.includes(COURIER_DIR)) continue;
+        newest = st.mtimeMs;
+        id = f.replace(/\.jsonl$/, '');
+      }
+    }
+    if (!id) throw new Error('信使会话创建失败');
+    fs.writeFileSync(COURIER_STATE, JSON.stringify({ id, at: Date.now() }, null, 2));
+    return id;
+  },
   /** 找运行中会话在 Claude 注册表里的名字（SendMessage 要用这个名字） */
   liveName(thread) {
     try {
@@ -407,6 +440,7 @@ const claude = {
     if (mode !== 'resume') {
       const name = TOOLS.claude.liveName(thread);
       if (name) {
+        const cid = await TOOLS.claude.courier();
         const prompt = [
           `用 ToolSearch 执行 select:SendMessage 加载 SendMessage（如果还没加载）。`,
           `然后用 SendMessage 给会话「${name}」发送下面这条消息。`,
@@ -416,12 +450,11 @@ const claude = {
           message,
           '>>>',
         ].join('\n');
-        const args = ['-p', prompt, '--allowedTools=ToolSearch,ListAgents,SendMessage'];
-        if (model) args.push('--model', model);
-        const r = await execFileP(BIN.claude, args, { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, cwd });
+        const args = ['--resume', cid, '-p', prompt, '--allowedTools=ToolSearch,ListAgents,SendMessage'];
+        const r = await execFileP(BIN.claude, args, { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, cwd: COURIER_DIR });
         return {
           mode: 'peer',
-          reply: `已投到会话「${name}」的 TUI · ${(r.stdout || '').trim().slice(0, 200)}`,
+          reply: `已投到会话「${name}」的 TUI · ${(r.stdout || '').trim().slice(0, 160)}`,
           replyText: '',
         };
       }
