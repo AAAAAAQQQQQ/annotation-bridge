@@ -333,10 +333,12 @@ const claude = {
 
     // Claude Code 会自己给会话起名字，存在 ai-title 记录里（aiTitle）；
     // 优先用它，退回到第一条真实用户消息。
-    let aiTitle = '', lastPrompt = '';
+    let aiTitle = '', lastPrompt = '', model = '';
     for (const d of parseLines(tailText(f.file, 262144))) {
       if (d.type === 'ai-title' && d.aiTitle) aiTitle = d.aiTitle;
       if (d.type === 'last-prompt' && d.lastPrompt) lastPrompt = d.lastPrompt;
+      // 助手消息里带实际模型 id（例如 claude-opus-5-5）
+      if (d.message?.model) model = d.message.model;
     }
 
     let firstUser = '', cwd = '';
@@ -354,7 +356,7 @@ const claude = {
     }
 
     const title = (aiTitle || firstUser || lastPrompt || `(${fmt(f.mtime)})`).replace(/\s+/g, ' ').slice(0, 90);
-    const value = { tool: 'claude', id: f.id, cwd, project: cwd ? path.basename(cwd) : f.dir, title, mtime: f.mtime, size: f.size, file: f.file };
+    const value = { tool: 'claude', id: f.id, cwd, project: cwd ? path.basename(cwd) : f.dir, title, model, mtime: f.mtime, size: f.size, file: f.file };
     this._metaCache.set(f.file, { mtime: f.mtime, value });
     return value;
   },

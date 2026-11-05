@@ -228,7 +228,7 @@ function renderList() {
   box.innerHTML = list.map((s) => `
     <div class="pop-item ${selected?.id === s.id ? 'active' : ''}" data-id="${s.id}">
       <b>${esc(s.title || String(s.id).slice(0, 8))}${qSummary[`${tool}|${s.id}`] ? `<span class="badge">${qSummary[`${tool}|${s.id}`]}</span>` : ''}${tool === 'dsh' && s.preset ? '<span class="ro" title="GUI 里创建的会话（agent preset），headless 不能投递，只能读">只读</span>' : ''}</b>
-      <small>${esc(s.project || '')} · ${String(s.id).slice(0, 8)} · ${ago(s.mtime)}</small>
+      <small>${esc(s.project || '')} · ${s.model ? esc(s.model) + ' · ' : ''}${String(s.id).slice(0, 8)} · ${ago(s.mtime)}</small>
     </div>`).join('');
   box.querySelectorAll('.pop-item').forEach((el) => el.addEventListener('click', () => {
     const s = sessions.find((x) => x.id === el.dataset.id);
@@ -289,7 +289,12 @@ function renderOpts() {
     if (cur && [...$(sel).options].some((o) => o.value === cur)) $(sel).value = cur;
   };
   fill('mode', (m.sendModes || []).map((x) => ({ value: x.id, label: x.label })));
-  fill('model', [{ value: '', label: '默认' }, ...(m.models || []).map((x) => ({ value: x.id, label: x.label || x.id }))]);
+  const sessionModel = selected?.model || '';
+  const modelOpts = (m.models || []).map((x) => ({ value: x.id, label: x.label || x.id }));
+  if (sessionModel && !modelOpts.some((o) => o.value === sessionModel)) {
+    modelOpts.unshift({ value: sessionModel, label: sessionModel });
+  }
+  fill('model', [{ value: '', label: sessionModel ? `默认（${sessionModel}）` : '默认' }, ...modelOpts]);
   fill('newModel', [{ value: '', label: '默认' }, ...(m.models || []).map((x) => ({ value: x.id, label: x.label || x.id }))]);
   renderEfforts('model', 'effort');
   renderEfforts('newModel', 'newEffort');
