@@ -326,21 +326,37 @@ const claude = {
     return out.sort((a, b) => b.mtime - a.mtime).slice(0, limit);
   },
 
+  _metaCache: new Map(),
   meta(f) {
-    let title = '', cwd = '';
-    for (const d of parseLines(headText(f.file, 65536))) {
+    const cached = this._metaCache.get(f.file);
+    if (cached && cached.mtime === f.mtime) return cached.value;
+
+    // Claude Code 会自己给会话起名字，存在 ai-title 记录里（aiTitle）；
+    // 优先用它，退回到第一条真实用户消息。
+    let aiTitle = '', lastPrompt = '';
+    for (const d of parseLines(tailText(f.file, 262144))) {
+      if (d.type === 'ai-title' && d.aiTitle) aiTitle = d.aiTitle;
+      if (d.type === 'last-prompt' && d.lastPrompt) lastPrompt = d.lastPrompt;
+    }
+
+    let firstUser = '', cwd = '';
+    for (const d of parseLines(headText(f.file, 131072))) {
       if (d.cwd && !cwd) cwd = d.cwd;
-      if (!title && d.type === 'user' && d.message?.content) {
+      if (!firstUser && d.type === 'user' && d.message?.content) {
         const c = d.message.content;
         const t = (Array.isArray(c) ? c.map((x) => x.text || '').join(' ') : String(c)).replace(/\s+/g, ' ').trim();
-        // Claude Code 的会话常以 <local-command-caveat> / <command-name> 开头，跳过这类包装
+        // 跳过 Claude Code 的 <local-command-caveat> / <command-name> 这类系统包装
         if (t && !/^<(local-command|command-|system|user-prompt-submit)/i.test(t) && !/^Caveat:/i.test(t)) {
-          title = t.slice(0, 90);
+          firstUser = t.slice(0, 90);
         }
       }
-      if (title && cwd) break;
+      if (firstUser && cwd) break;
     }
-    return { tool: 'claude', id: f.id, cwd, project: cwd ? path.basename(cwd) : f.dir, title: title || `(${fmt(f.mtime)})`, mtime: f.mtime, size: f.size, file: f.file };
+
+    const title = (aiTitle || firstUser || lastPrompt || `(${fmt(f.mtime)})`).replace(/\s+/g, ' ').slice(0, 90);
+    const value = { tool: 'claude', id: f.id, cwd, project: cwd ? path.basename(cwd) : f.dir, title, mtime: f.mtime, size: f.size, file: f.file };
+    this._metaCache.set(f.file, { mtime: f.mtime, value });
+    return value;
   },
 
   sessions(limit) { return this.files().slice(0, limit).map((f) => this.meta(f)); },
