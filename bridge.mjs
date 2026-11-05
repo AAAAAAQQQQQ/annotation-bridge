@@ -440,7 +440,6 @@ const claude = {
     if (mode !== 'resume') {
       const name = TOOLS.claude.liveName(thread);
       if (name) {
-        const cid = await TOOLS.claude.courier();
         const prompt = [
           `用 ToolSearch 执行 select:SendMessage 加载 SendMessage（如果还没加载）。`,
           `然后用 SendMessage 给会话「${name}」发送下面这条消息。`,
@@ -450,8 +449,18 @@ const claude = {
           message,
           '>>>',
         ].join('\n');
-        const args = ['--resume', cid, '-p', prompt, '--allowedTools=ToolSearch,ListAgents,SendMessage'];
-        const r = await execFileP(BIN.claude, args, { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, cwd: COURIER_DIR });
+        const run = async (cid) => execFileP(BIN.claude,
+          ['--resume', cid, '-p', prompt, '--allowedTools=ToolSearch,ListAgents,SendMessage'],
+          { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, cwd: COURIER_DIR });
+
+        let r;
+        try {
+          r = await run(await TOOLS.claude.courier());
+        } catch (e) {
+          // 信使会话被删/损坏：清掉状态重建一次
+          try { fs.unlinkSync(COURIER_STATE); } catch {}
+          r = await run(await TOOLS.claude.courier());
+        }
         return {
           mode: 'peer',
           reply: `已投到会话「${name}」的 TUI · ${(r.stdout || '').trim().slice(0, 160)}`,

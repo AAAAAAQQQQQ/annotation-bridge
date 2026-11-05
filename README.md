@@ -71,6 +71,8 @@ headless profile 默认走 `deepseek-official`，需要 `DEEPSEEK_API_KEY`；DSH
 
 **预览**：队列旁边「预览」能看最终要发出去的那段原文（选择器、备注、附件说明都在里面），可以复制或直接发送。
 
+**Claude 走固定信使**：Claude 没有公开的注入接口，外部 `claude -p` 写进去的记录 `entrypoint=sdk-cli`，TUI 不显示。所以 Claude 的默认方式改成「投到会话 · TUI 可见」——由一个**固定的信使会话**（只建一次，存在 `~/.annotation-bridge/courier.json`）用 Claude 自己的 `SendMessage` 投给目标会话。目标 TUI 收到的是 `entrypoint=cli` 的正常消息，Claude 会照常处理并回复。信使每次转发约 20~40 秒；目标会话没在跑时退回后台续跑（下次进 TUI 才看得到）。
+
 **Codex 的排队只在「回合正常结束」时被消费**：会话正在跑任务时，消息会一直躺在 Codex 自己的队列里；按 Esc 打断**不会**让它立刻发，得等下一次回合结束。想马上送达就用「立刻执行·续跑」（会另起一轮；会话正忙时两个进程会抢同一个会话，所以忙的时候才用排队）。
 
 **排队 ≠ 续跑**，这两个不是一回事：
