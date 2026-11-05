@@ -610,11 +610,25 @@ let courierTurn = null;
 let courierChain = Promise.resolve();
 let courierIdleTimer = null;
 
+function courierSessionId() {
+  try { return JSON.parse(fs.readFileSync(COURIER_STATE, 'utf8')).id || ''; } catch { return ''; }
+}
+function saveCourierSessionId(id) {
+  if (!id) return;
+  try {
+    fs.mkdirSync(path.dirname(COURIER_STATE), { recursive: true });
+    fs.writeFileSync(COURIER_STATE, JSON.stringify({ id, at: Date.now() }, null, 2));
+  } catch {}
+}
+
 function startCourier() {
   if (courierProc) return courierProc;
   fs.mkdirSync(COURIER_DIR, { recursive: true });
+  const sid = courierSessionId();
+  // 固定同一个会话：每次进程重启都 --resume 回去，不再新建
   const p = spawn(BIN.claude, [
-    '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+    '-p', ...(sid ? ['--resume', sid] : []),
+    '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     '--allowedTools=ToolSearch,SendMessage,ListAgents',
   ], { cwd: COURIER_DIR, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
   p.stdout.setEncoding('utf8');
@@ -646,6 +660,7 @@ function onCourierLine(line) {
   if (!line.trim()) return;
   let d;
   try { d = JSON.parse(line); } catch { return; }
+  if (d.session_id && d.session_id !== courierSessionId()) saveCourierSessionId(d.session_id);
   if (d.type !== 'result' || !courierTurn) return;
   const t = courierTurn;
   courierTurn = null;
@@ -674,7 +689,21 @@ function courierTurnRun(prompt, timeoutMs = 120000) {
 
 /** 串行投递一轮；前一轮失败也不卡后面 */
 function courierSend(prompt) {
-  const run = () => courierTurnRun(prompt);
+  const run = async () => {
+    try {
+      return await courierTurnRun(prompt);
+    } catch (e) {
+      const msg = String(e?.message || e);
+      // 会话被删/损坏：清掉 id、杀掉进程，重开一次
+      if (/No conversation|not found|resume|已退出/i.test(msg)) {
+        try { fs.unlinkSync(COURIER_STATE); } catch {}
+        try { courierProc?.kill(); } catch {}
+        courierProc = null;
+        return await courierTurnRun(prompt);
+      }
+      throw e;
+    }
+  };
   const result = courierChain.then(run, run);
   courierChain = result.catch(() => {});
   // 空闲 60 分钟就释放进程，下次自动重启
