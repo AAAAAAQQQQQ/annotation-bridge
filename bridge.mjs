@@ -18,7 +18,9 @@ const VERSION = '0.2.0';
 
 // Chrome / Finder 拉起的进程 PATH 往往只有 /usr/bin:/bin，补上常见安装位置，
 // 否则 codex / node / zstd 全都“找不到”，面板里工具会变灰。
-const EXTRA_PATH = ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
+const EXTRA_PATH = ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin',
+  path.join(HOME, '.local', 'bin'), path.join(HOME, '.claude', 'local'),
+  path.join(HOME, '.bun', 'bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
 process.env.PATH = [...new Set([...(process.env.PATH || '').split(':').filter(Boolean), ...EXTRA_PATH])].join(':');
 
 const BIN = {
@@ -330,8 +332,11 @@ const claude = {
       if (d.cwd && !cwd) cwd = d.cwd;
       if (!title && d.type === 'user' && d.message?.content) {
         const c = d.message.content;
-        const t = Array.isArray(c) ? c.map((x) => x.text || '').join(' ') : String(c);
-        if (t?.trim()) title = t.replace(/\s+/g, ' ').slice(0, 90);
+        const t = (Array.isArray(c) ? c.map((x) => x.text || '').join(' ') : String(c)).replace(/\s+/g, ' ').trim();
+        // Claude Code 的会话常以 <local-command-caveat> / <command-name> 开头，跳过这类包装
+        if (t && !/^<(local-command|command-|system|user-prompt-submit)/i.test(t) && !/^Caveat:/i.test(t)) {
+          title = t.slice(0, 90);
+        }
       }
       if (title && cwd) break;
     }

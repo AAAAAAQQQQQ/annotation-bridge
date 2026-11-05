@@ -52,6 +52,7 @@ async function ensureBridge() {
       const env = {
         ...process.env,
         PATH: [...new Set([...(process.env.PATH || '').split(':').filter(Boolean),
+          path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.claude', 'local'),
           '/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'])].join(':'),
       };
       const child = spawn(NODE, [path.join(ROOT, 'bridge.mjs')], {
