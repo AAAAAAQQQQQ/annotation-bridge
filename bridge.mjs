@@ -28,6 +28,7 @@ const BIN = {
   claude: process.env.CLAUDE_BIN || 'claude',
   dsh: process.env.DSH_BIN || '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh',
 };
+const CC_SESSIONS = path.join(HOME, '.claude', 'sessions');
 const DIRS = {
   codex: path.join(HOME, '.codex', 'sessions'),
   claude: path.join(HOME, '.claude', 'projects'),
@@ -309,7 +310,7 @@ const dsh = {
 const claude = {
   id: 'claude', label: 'Claude Code',
   models: ['sonnet', 'opus', 'haiku'],   // CLI 认的别名；全名会随版本变
-  sendModes: [{ id: 'print', label: '续跑·换模型' }],
+  sendModes: [{ id: 'peer', label: '投到会话 · TUI 可见' }, { id: 'resume', label: '后台续跑 · TUI 不显示' }],
 
   files(limit = 300) {
     const out = [];
@@ -385,10 +386,50 @@ const claude = {
     return { threadId, replyText: text, model: model || '默认' };
   },
 
-  async send({ thread, model, message, session }) {
+  /** 找运行中会话在 Claude 注册表里的名字（SendMessage 要用这个名字） */
+  liveName(thread) {
+    try {
+      for (const f of fs.readdirSync(CC_SESSIONS)) {
+        if (!f.endsWith('.json')) continue;
+        try {
+          const j = JSON.parse(fs.readFileSync(path.join(CC_SESSIONS, f), 'utf8'));
+          if (j.sessionId === thread && j.name) return j.name;
+        } catch {}
+      }
+    } catch {}
+    return null;
+  },
+  async send({ thread, mode, model, message, session }) {
+    const cwd = session?.cwd && exists(session.cwd) ? session.cwd : process.cwd();
+
+    // 首选：让一个临时会话用 Claude 自己的 SendMessage 投给运行中的会话，
+    // 这样消息会以 entrypoint=cli 落进 TUI，Claude 会正常处理并回复。
+    if (mode !== 'resume') {
+      const name = TOOLS.claude.liveName(thread);
+      if (name) {
+        const prompt = [
+          `用 ToolSearch 执行 select:SendMessage 加载 SendMessage（如果还没加载）。`,
+          `然后用 SendMessage 给会话「${name}」发送下面这条消息。`,
+          `要求：原文照发，不要改写、不要总结、不要加任何前缀或解释。`,
+          ``,
+          '<<<',
+          message,
+          '>>>',
+        ].join('\n');
+        const args = ['-p', prompt, '--allowedTools=ToolSearch,ListAgents,SendMessage'];
+        if (model) args.push('--model', model);
+        const r = await execFileP(BIN.claude, args, { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, cwd });
+        return {
+          mode: 'peer',
+          reply: `已投到会话「${name}」的 TUI · ${(r.stdout || '').trim().slice(0, 200)}`,
+          replyText: '',
+        };
+      }
+    }
+
+    // 退路：会话没在跑，直接后台续跑（下次进 TUI 才看得到）
     const args = ['--resume', thread, '-p', message];
     if (model) args.push('--model', model);
-    const cwd = session?.cwd && exists(session.cwd) ? session.cwd : process.cwd();
     const r = await execFileP(BIN.claude, args, { timeout: 15 * 60 * 1000, maxBuffer: 32 * 1024 * 1024, cwd });
     return { mode: 'print', model: model || '会话当前模型', replyText: (r.stdout || '').trim() };
   },
@@ -540,7 +581,7 @@ function publicJob(j) {
   return {
     id: j.id, tool: j.tool, thread: j.thread, mode: j.mode, status: j.status,
     startedAt: j.startedAt, finishedAt: j.finishedAt, count: j.count,
-    replyText: j.replyText || '', error: j.error || '',
+    replyText: j.replyText || '', reply: j.reply || '', error: j.error || '',
     pendingCount: j.pendingCount, reason: j.reason, preset: j.preset,
   };
 }
@@ -563,6 +604,7 @@ function runJob(job, ctx) {
       job.finishedAt = Date.now();
       job.result = r;
       job.replyText = r.replyText || '';
+      job.reply = r.reply || '';
       job.pendingCount = r.pendingCount;
     } catch (e) {
       job.status = 'error';

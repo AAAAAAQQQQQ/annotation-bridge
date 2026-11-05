@@ -957,7 +957,9 @@ function startJobPoll() {
       currentJob = null;
       await loadQueue(); await refreshSummary();
       if (j.status === 'done') {
-        if (j.mode === 'queue') {
+        if (j.reply) {
+          hint('sendHint', j.reply.slice(0, 160), 'ok');
+        } else if (j.mode === 'queue') {
           hint('sendHint', `已预提交 ${j.count} 条 · Codex 队列里还有 ${j.pendingCount ?? '?'} 条，当前任务结束后自动发送`, 'ok');
         } else {
           hint('sendHint', `完成 · 用时 ${sec}s${j.pendingCount ? ` · Codex 队列里还有 ${j.pendingCount} 条` : ''}`, 'ok');
