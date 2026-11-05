@@ -449,21 +449,10 @@ const claude = {
           message,
           '>>>',
         ].join('\n');
-        const run = async (cid) => execFileP(BIN.claude,
-          ['--resume', cid, '-p', prompt, '--allowedTools=ToolSearch,ListAgents,SendMessage'],
-          { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, cwd: COURIER_DIR });
-
-        let r;
-        try {
-          r = await run(await TOOLS.claude.courier());
-        } catch (e) {
-          // 信使会话被删/损坏：清掉状态重建一次
-          try { fs.unlinkSync(COURIER_STATE); } catch {}
-          r = await run(await TOOLS.claude.courier());
-        }
+        const r = await courierSend(prompt);
         return {
           mode: 'peer',
-          reply: `已投到会话「${name}」的 TUI · ${(r.stdout || '').trim().slice(0, 160)}`,
+          reply: `已投到会话「${name}」的 TUI · ${(r.text || '').slice(0, 160)}`,
           replyText: '',
         };
       }
@@ -610,6 +599,93 @@ function composeMessage(items) {
   }
   out.push('改完逐条说明改了什么。');
   return out.join('\n');
+}
+
+// ── 常驻信使（温会话）──────────────────────────────────
+// 一次启动一个 claude 进程，用 stream-json 持续喂 user 消息；
+// 每条转发只是一次 turn，不用每条都冷启（冷启 20~40s）。
+let courierProc = null;
+let courierBuf = '';
+let courierTurn = null;
+let courierChain = Promise.resolve();
+let courierIdleTimer = null;
+
+function startCourier() {
+  if (courierProc) return courierProc;
+  fs.mkdirSync(COURIER_DIR, { recursive: true });
+  const p = spawn(BIN.claude, [
+    '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+    '--allowedTools=ToolSearch,SendMessage,ListAgents',
+  ], { cwd: COURIER_DIR, env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  p.stdout.setEncoding('utf8');
+  p.stdout.on('data', (chunk) => {
+    courierBuf += chunk;
+    let i;
+    while ((i = courierBuf.indexOf('\n')) >= 0) {
+      const line = courierBuf.slice(0, i);
+      courierBuf = courierBuf.slice(i + 1);
+      onCourierLine(line);
+    }
+  });
+  p.stderr.on('data', () => {});
+  p.on('exit', () => {
+    if (courierProc === p) courierProc = null;
+    if (courierTurn) {
+      const t = courierTurn;
+      courierTurn = null;
+      clearTimeout(t.timer);
+      t.reject(new Error('信使进程已退出'));
+    }
+  });
+  p.on('error', () => { if (courierProc === p) courierProc = null; });
+  courierProc = p;
+  return p;
+}
+
+function onCourierLine(line) {
+  if (!line.trim()) return;
+  let d;
+  try { d = JSON.parse(line); } catch { return; }
+  if (d.type !== 'result' || !courierTurn) return;
+  const t = courierTurn;
+  courierTurn = null;
+  clearTimeout(t.timer);
+  if (d.is_error) t.reject(new Error(String(d.result || d.subtype || '信使返回错误')));
+  else t.resolve({ text: String(d.result || '').trim(), sessionId: d.session_id });
+}
+
+function courierTurnRun(prompt, timeoutMs = 120000) {
+  const p = startCourier();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (courierTurn && courierTurn.reject === reject) courierTurn = null;
+      reject(new Error('信使 turn 超时（120 秒）'));
+    }, timeoutMs);
+    courierTurn = { resolve, reject, timer };
+    try {
+      p.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } }) + '\n');
+    } catch (e) {
+      clearTimeout(timer);
+      courierTurn = null;
+      reject(e);
+    }
+  });
+}
+
+/** 串行投递一轮；前一轮失败也不卡后面 */
+function courierSend(prompt) {
+  const run = () => courierTurnRun(prompt);
+  const result = courierChain.then(run, run);
+  courierChain = result.catch(() => {});
+  // 空闲 60 分钟就释放进程，下次自动重启
+  if (courierIdleTimer) clearTimeout(courierIdleTimer);
+  courierIdleTimer = setTimeout(() => {
+    if (courierTurn) return;
+    try { courierProc?.kill(); } catch {}
+    courierProc = null;
+  }, 60 * 60 * 1000);
+  courierIdleTimer.unref?.();
+  return result;
 }
 
 // ── 异步发送任务 ──────────────────────────────────────
