@@ -711,6 +711,19 @@ const server = http.createServer(async (req, res) => {
       const text = String(b.text || '');
       if (!text.trim()) return json(res, 400, { error: 'text required' });
       const app = b.app || process.env.TUI_APP || 'Ghostty';
+
+      // 1) 优先交给 信鸽.app：它在 GUI 进程里用 CGEvent 粘贴，辅助功能权限也记在它头上
+      try {
+        const r = await fetch(`http://127.0.0.1:${process.env.CONTROL_PORT || 47392}/paste`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text, app, activate: b.activate !== false }),
+          signal: AbortSignal.timeout(9000),
+        });
+        if (r.ok) return json(res, 200, await r.json());
+      } catch { /* app 没开就走下面的退路 */ }
+
+      // 2) 退路：bridge 自己复制 + 激活（没有权限时只能手动 ⌘V）
       try {
         await new Promise((resolve, reject) => {
           const pr = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] });
@@ -721,27 +734,11 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         return json(res, 500, { error: '复制到剪贴板失败：' + String(e?.message || e) });
       }
-
       let focused = false;
       if (b.activate !== false) {
         try { await execFileP('open', ['-a', app], { timeout: 5000 }); focused = true; } catch {}
       }
-
-      let pasted = false;
-      if (b.keystroke !== false) {
-        try {
-          await execFileP('osascript', ['-e',
-            `tell application "System Events" to keystroke "v" using command down`,
-            '-e', 'delay 0.25',
-            '-e', `tell application "System Events" to key code 36`,
-          ], { timeout: 8000 });
-          pasted = true;
-        } catch (e) {
-          // 没有辅助功能权限时会失败，让用户手动 ⌘V
-          pasted = false;
-        }
-      }
-      return json(res, 200, { ok: true, copied: true, focused, pasted, app });
+      return json(res, 200, { ok: true, copied: true, focused, pasted: false, trusted: false, app });
     }
 
     if (p === '/capture' && req.method === 'POST') {

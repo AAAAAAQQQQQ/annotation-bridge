@@ -18,6 +18,7 @@
    "logPath":"~/Library/Logs/annotation-bridge.log"}
 """
 
+import ctypes
 import json
 import os
 import subprocess
@@ -25,6 +26,7 @@ import sys
 import threading
 import time
 import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HOME = os.path.expanduser("~")
 SHELL_PATH = ":".join([
@@ -243,7 +245,103 @@ def notify_once(text, title):
 
 # ── GUI ─────────────────────────────────────────────
 
+CONTROL_PORT = 47392
+
+
+def ax_trusted():
+    """是否有辅助功能权限（没有的话 CGEvent 会被系统丢弃）。"""
+    try:
+        lib = ctypes.CDLL(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+        lib.AXIsProcessTrusted.restype = ctypes.c_bool
+        return bool(lib.AXIsProcessTrusted())
+    except Exception:
+        return False
+
+
+def _key(code, flags=0):
+    import Quartz
+    for down in (True, False):
+        ev = Quartz.CGEventCreateKeyboardEvent(None, code, down)
+        if flags:
+            Quartz.CGEventSetFlags(ev, flags)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+        time.sleep(0.03)
+
+
+def paste_to_terminal(text, app_name="Ghostty", activate=True):
+    """把文本放进剪贴板 → 激活终端 → ⌘V + 回车。"""
+    from AppKit import NSPasteboard, NSPasteboardTypeString
+    pb = NSPasteboard.generalPasteboard()
+    pb.clearContents()
+    pb.setString_forType_(text, NSPasteboardTypeString)
+
+    focused = False
+    if activate:
+        try:
+            subprocess.run(["open", "-a", app_name], timeout=5,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            focused = True
+            time.sleep(0.45)
+        except Exception:
+            focused = False
+
+    trusted = ax_trusted()
+    pasted = False
+    if trusted:
+        import Quartz
+        try:
+            _key(9, Quartz.kCGEventFlagMaskCommand)   # ⌘V
+            time.sleep(0.25)
+            _key(36)                                  # Return
+            pasted = True
+        except Exception:
+            pasted = False
+    return {"ok": True, "copied": True, "focused": focused,
+            "pasted": pasted, "trusted": trusted, "app": app_name}
+
+
+def start_control_server():
+    """给 bridge 用的本地控制口：POST /paste"""
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _send(self, code, obj):
+            body = json.dumps(obj, ensure_ascii=False).encode()
+            self.send_response(code)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except Exception:
+                pass
+
+        def do_POST(self):
+            if self.path != "/paste":
+                return self._send(404, {"error": "not found"})
+            try:
+                n = int(self.headers.get("content-length") or 0)
+                data = json.loads(self.rfile.read(n) or b"{}")
+                text = str(data.get("text") or "")
+                if not text.strip():
+                    return self._send(400, {"error": "text required"})
+                self._send(200, paste_to_terminal(
+                    text, data.get("app") or "Ghostty", data.get("activate") is not False))
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", CONTROL_PORT), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        alog(f"控制口已启动 127.0.0.1:{CONTROL_PORT}  ax_trusted={ax_trusted()}")
+    except OSError as e:
+        alog(f"控制口启动失败: {e}")
+
+
 def gui(s, show_window=True):
+    start_control_server()
     import objc
     from AppKit import (
         NSApplication, NSApplicationActivationPolicyRegular, NSAlert, NSBezierPath,
