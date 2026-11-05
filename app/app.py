@@ -26,12 +26,12 @@ import threading
 import time
 import urllib.request
 
+HOME = os.path.expanduser("~")
 SHELL_PATH = ":".join([
     os.path.join(HOME, ".local", "bin"), os.path.join(HOME, ".claude", "local"),
     "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin",
     "/usr/bin", "/bin", "/usr/sbin", "/sbin",
 ])
-HOME = os.path.expanduser("~")
 APP_LOG = os.path.join(HOME, "Library/Logs/annotation-bridge-app.log")
 
 
