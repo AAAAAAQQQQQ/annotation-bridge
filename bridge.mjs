@@ -7,7 +7,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
@@ -703,6 +703,45 @@ const server = http.createServer(async (req, res) => {
         }
       }
       return json(res, 404, { error: 'capture not found' });
+    }
+
+    // 把文本送进终端里的交互式会话：复制到剪贴板 → 激活终端 → 尝试自动粘贴+回车
+    if (p === '/paste' && req.method === 'POST') {
+      const b = await readBody(req);
+      const text = String(b.text || '');
+      if (!text.trim()) return json(res, 400, { error: 'text required' });
+      const app = b.app || process.env.TUI_APP || 'Ghostty';
+      try {
+        await new Promise((resolve, reject) => {
+          const pr = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] });
+          pr.on('error', reject);
+          pr.on('close', (code) => (code === 0 ? resolve() : reject(new Error('pbcopy 失败'))));
+          pr.stdin.end(text);
+        });
+      } catch (e) {
+        return json(res, 500, { error: '复制到剪贴板失败：' + String(e?.message || e) });
+      }
+
+      let focused = false;
+      if (b.activate !== false) {
+        try { await execFileP('open', ['-a', app], { timeout: 5000 }); focused = true; } catch {}
+      }
+
+      let pasted = false;
+      if (b.keystroke !== false) {
+        try {
+          await execFileP('osascript', ['-e',
+            `tell application "System Events" to keystroke "v" using command down`,
+            '-e', 'delay 0.25',
+            '-e', `tell application "System Events" to key code 36`,
+          ], { timeout: 8000 });
+          pasted = true;
+        } catch (e) {
+          // 没有辅助功能权限时会失败，让用户手动 ⌘V
+          pasted = false;
+        }
+      }
+      return json(res, 200, { ok: true, copied: true, focused, pasted, app });
     }
 
     if (p === '/capture' && req.method === 'POST') {

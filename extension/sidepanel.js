@@ -1185,6 +1185,15 @@ function bind() {
     const ok = await copyText(previewMessage);
     hint('sendHint', ok ? '已复制到剪贴板 · 去 Codex 里 ⌘V 即可' : '复制失败', ok ? 'ok' : 'err');
   });
+  $('btnPreviewPaste')?.addEventListener('click', async () => {
+    try {
+      const d = await api('/paste', { method: 'POST', idempotent: true, body: JSON.stringify({ text: previewMessage }) });
+      if (d.pasted) hint('sendHint', '已粘贴到终端并回车 · 去 Claude 窗口看', 'ok');
+      else if (d.focused) hint('sendHint', '已复制并切到终端 · 按 ⌘V 回车即可', 'ok');
+      else hint('sendHint', '已复制到剪贴板 · 去终端 ⌘V 回车', 'ok');
+      $('previewModal').classList.add('hidden');
+    } catch (e) { hint('sendHint', '投到终端失败：' + friendly(e), 'err'); }
+  });
   $('btnPreviewSend')?.addEventListener('click', () => {
     $('previewModal').classList.add('hidden');
     sendAll();
