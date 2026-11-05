@@ -308,7 +308,7 @@ const dsh = {
 // ── Claude ────────────────────────────────────────────
 const claude = {
   id: 'claude', label: 'Claude Code',
-  models: ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5'],
+  models: ['sonnet', 'opus', 'haiku'],   // CLI 认的别名；全名会随版本变
   sendModes: [{ id: 'print', label: '续跑·换模型' }],
 
   files(limit = 300) {
@@ -383,10 +383,11 @@ const claude = {
     return { threadId, replyText: text, model: model || '默认' };
   },
 
-  async send({ thread, model, message }) {
+  async send({ thread, model, message, session }) {
     const args = ['--resume', thread, '-p', message];
     if (model) args.push('--model', model);
-    const r = await execFileP(BIN.claude, args, { timeout: 15 * 60 * 1000, maxBuffer: 32 * 1024 * 1024 });
+    const cwd = session?.cwd && exists(session.cwd) ? session.cwd : process.cwd();
+    const r = await execFileP(BIN.claude, args, { timeout: 15 * 60 * 1000, maxBuffer: 32 * 1024 * 1024, cwd });
     return { mode: 'print', model: model || '会话当前模型', replyText: (r.stdout || '').trim() };
   },
 };
