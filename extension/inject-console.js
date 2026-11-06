@@ -8,9 +8,18 @@
     if (typeof a === 'string') return a;
     try { return JSON.stringify(a); } catch { return String(a); }
   };
+  // 页面加载早期打的日志，内容脚本还没开始听，先存着
+  const backlog = [];
   const post = (level, text) => {
-    try { window.postMessage({ __abConsole: 1, level, text: String(text).slice(0, 600) }, '*'); } catch {}
+    const rec = { level, text: String(text).slice(0, 600) };
+    backlog.push(rec);
+    while (backlog.length > 200) backlog.shift();
+    try { window.postMessage({ __abConsole: 1, ...rec }, '*'); } catch {}
   };
+  window.addEventListener('message', (e) => {
+    if (e.source !== window || !e.data || e.data.__abNeedBacklog !== 1) return;
+    try { window.postMessage({ __abBacklog: 1, items: backlog.slice() }, '*'); } catch {}
+  });
 
   for (const lvl of ['log', 'info', 'warn', 'error']) {
     const orig = console[lvl];

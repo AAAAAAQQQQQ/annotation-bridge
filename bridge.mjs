@@ -11,6 +11,30 @@ import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
+
+/** spawn 版执行器：execFile + input 在 codex resume 上会卡死，改用 spawn 写 stdin */
+function runSpawn(bin, args, { input = '', cwd, timeout = 15 * 60 * 1000, env } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { cwd, env: env || process.env });
+    let stdout = '', stderr = '';
+    let done = false;
+    const finish = (err, out) => { if (done) return; done = true; clearTimeout(timer); err ? reject(err) : resolve(out); };
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      finish(Object.assign(new Error(`timeout after ${timeout}ms`), { code: 'ETIMEDOUT', stderr }));
+    }, timeout);
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', (e) => finish(e));
+    child.on('close', (code) => {
+      if (code === 0) return finish(null, { stdout, stderr, code });
+      finish(Object.assign(new Error(stderr || `exit ${code}`), { code, stdout, stderr }));
+    });
+    try { child.stdin.end(input); } catch {}
+  });
+}
+
+
 const PORT = Number(process.env.BRIDGE_PORT || 47391);
 const DRY_RUN = process.env.DRY_RUN === '1';
 const HOME = os.homedir();
@@ -176,8 +200,8 @@ const codex = {
       for (const img of images || []) args.push('-i', img);   // 让模型直接看到截图
       args.push('-');
       const cwd = session?.cwd && exists(session.cwd) ? session.cwd : process.cwd();
-      const r = await execFileP(BIN.codex, args, {
-        timeout: 15 * 60 * 1000, maxBuffer: 32 * 1024 * 1024, input: message, cwd,
+      const r = await runSpawn(BIN.codex, args, {
+        timeout: 15 * 60 * 1000, input: message, cwd,
       });
       return { mode, model: model || '会话当前模型', effort: effort || '', replyText: (r.stdout || '').trim() };
     }

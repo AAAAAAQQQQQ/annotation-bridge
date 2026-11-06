@@ -11,10 +11,14 @@
     if (logs.length > MAX_LOGS) logs.shift();
   };
 
+  // 请求主世界补发加载早期的日志（那时我们还没开始监听）
+  try { window.postMessage({ __abNeedBacklog: 1 }, '*'); } catch {}
+
   // 控制台：由主世界的 inject-console.js 通过 postMessage 送过来
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data) return;
-    if (e.data.__abConsole === 1) push(e.data.level, e.data.text);
+    if (e.data.__abConsole === 1) { push(e.data.level, e.data.text); return; }
+    if (e.data.__abBacklog === 1) { (e.data.items || []).forEach((it) => push(it.level, it.text)); return; }
     if (e.data.__abNet === 1 && e.data.rec) {
       net.push(e.data.rec);
       while (net.length > 100) net.shift();
